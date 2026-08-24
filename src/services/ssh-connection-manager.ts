@@ -7,7 +7,7 @@ import {
 } from "../models/types.js";
 import { Logger } from "../utils/logger.js";
 import { collectSystemStatus } from "../utils/status-collector.js";
-import { ToolError } from "../utils/tool-error.js";
+import { ToolError, ToolErrorCode } from "../utils/tool-error.js";
 import fs from "fs";
 import path from "path";
 import type { Duplex } from "node:stream";
@@ -26,6 +26,18 @@ type ShellCommandMatch = {
   exitCode: number;
   remainder: string;
 };
+
+/**
+ * Command validation modes:
+ * - "standard": existing behavior — a configured whitelist is a hard boundary.
+ *   Used for internal commands (e.g. status collection) that must not bypass it.
+ * - "approval": whitelist is skipped; only the blacklist is enforced. Used by the
+ *   execute-command tool, whose gate is the client-side approval prompt.
+ * - "whitelisted": the command MUST match the connection's whitelist (a missing
+ *   whitelist rejects everything). Used by the run-whitelisted-command tool so it
+ *   can be allowlisted client-side (no prompt) without running arbitrary commands.
+ */
+type CommandValidationMode = "standard" | "approval" | "whitelisted";
 
 type SshAuthMethod =
   | "none"
@@ -376,7 +388,12 @@ export class SSHConnectionManager {
   }
 
   /**
-   * Execute SSH command
+   * Execute SSH command (approval path).
+   *
+   * The command whitelist is intentionally NOT enforced here: this tool is the
+   * fallback that is gated by the client's permission prompt, so a human decides
+   * whether a non-whitelisted command may run. The blacklist is still a hard
+   * boundary.
    */
   public async executeCommand(
     cmdString: string,
@@ -384,7 +401,37 @@ export class SSHConnectionManager {
     name?: string,
     options: { timeout?: number } = {},
   ): Promise<string> {
-    return this.runCommandInternal(cmdString, directory, name, options);
+    return this.runCommandInternal(
+      cmdString,
+      directory,
+      name,
+      options,
+      "approval",
+    );
+  }
+
+  /**
+   * Execute a command that MUST match the connection's command whitelist.
+   *
+   * This is the "silent" path for whitelisted commands. Pair it with a client-side
+   * allowlist (e.g. Claude Code permissions.allow) so whitelisted commands run
+   * without a permission prompt, while anything else is rejected here with
+   * COMMAND_NOT_WHITELISTED and falls back to execute-command for human approval.
+   * The blacklist is still a hard boundary.
+   */
+  public async executeWhitelistedCommand(
+    cmdString: string,
+    directory?: string,
+    name?: string,
+    options: { timeout?: number } = {},
+  ): Promise<string> {
+    return this.runCommandInternal(
+      cmdString,
+      directory,
+      name,
+      options,
+      "whitelisted",
+    );
   }
 
   /**
@@ -1254,32 +1301,54 @@ export class SSHConnectionManager {
   private validateCommand(
     command: string,
     name?: string,
-  ): { isAllowed: boolean; reason?: string } {
+    mode: CommandValidationMode = "standard",
+  ): { isAllowed: boolean; reason?: string; code?: ToolErrorCode } {
     const key = name || this.defaultName;
-    const whitelistRegexes = this.commandWhitelistRegexes.get(key) || [];
-    if (whitelistRegexes.length > 0) {
-      const matchesWhitelist = whitelistRegexes.some((regex) =>
-        regex.test(command),
-      );
-      if (!matchesWhitelist) {
+
+    if (mode === "whitelisted") {
+      const whitelistRegexes = this.commandWhitelistRegexes.get(key) || [];
+      if (whitelistRegexes.length === 0) {
         return {
           isAllowed: false,
+          code: "COMMAND_NOT_WHITELISTED",
+          reason:
+            "No command whitelist is configured for this connection; use execute-command to run commands with approval",
+        };
+      }
+      if (!whitelistRegexes.some((regex) => regex.test(command))) {
+        return {
+          isAllowed: false,
+          code: "COMMAND_NOT_WHITELISTED",
+          reason:
+            "Command is not in the whitelist; use execute-command to run it with approval",
+        };
+      }
+    } else if (mode === "standard") {
+      const whitelistRegexes = this.commandWhitelistRegexes.get(key) || [];
+      if (
+        whitelistRegexes.length > 0 &&
+        !whitelistRegexes.some((regex) => regex.test(command))
+      ) {
+        return {
+          isAllowed: false,
+          code: "COMMAND_VALIDATION_FAILED",
           reason: "Command not in whitelist, execution forbidden",
         };
       }
     }
+    // mode === "approval": the whitelist is intentionally skipped — the client's
+    // approval prompt is the gate for this path.
 
     const blacklistRegexes = this.commandBlacklistRegexes.get(key) || [];
-    if (blacklistRegexes.length > 0) {
-      const matchesBlacklist = blacklistRegexes.some((regex) =>
-        regex.test(command),
-      );
-      if (matchesBlacklist) {
-        return {
-          isAllowed: false,
-          reason: "Command matches blacklist, execution forbidden",
-        };
-      }
+    if (
+      blacklistRegexes.length > 0 &&
+      blacklistRegexes.some((regex) => regex.test(command))
+    ) {
+      return {
+        isAllowed: false,
+        code: "COMMAND_VALIDATION_FAILED",
+        reason: "Command matches blacklist, execution forbidden",
+      };
     }
 
     return {
@@ -1336,11 +1405,12 @@ export class SSHConnectionManager {
     directory?: string,
     name?: string,
     options: RunCommandOptions = {},
+    mode: CommandValidationMode = "standard",
   ): Promise<string> {
-    const validationResult = this.validateCommand(cmdString, name);
+    const validationResult = this.validateCommand(cmdString, name, mode);
     if (!validationResult.isAllowed) {
       throw new ToolError(
-        "COMMAND_VALIDATION_FAILED",
+        validationResult.code || "COMMAND_VALIDATION_FAILED",
         `Command validation failed: ${validationResult.reason}`,
         false,
       );

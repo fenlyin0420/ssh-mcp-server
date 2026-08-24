@@ -1619,4 +1619,132 @@ describe('SSH Connection Manager', () => {
       assert.strictEqual(result, 'done');
     });
   });
+
+  describe('白名单直行（run-whitelisted-command）与审批模式（execute-command）', () => {
+    function createExecClient(handler) {
+      const client = new FakeClient({
+        onConnect: () => setImmediate(() => client.emit('ready')),
+        onExec: handler,
+      });
+      manager.createClient = () => client;
+      manager.scheduleStatusCollection = () => {};
+      return client;
+    }
+
+    function emitSuccess(stream, output) {
+      setImmediate(() => {
+        stream.emit('data', Buffer.from(`${output}\n`));
+        stream.emit('exit', 0);
+        stream.emit('close', 0);
+      });
+    }
+
+    it('executeWhitelistedCommand 命中白名单时正常执行', async () => {
+      const stream = new FakeExecStream();
+      const client = createExecClient(({ callback }) => {
+        callback(undefined, stream);
+        emitSuccess(stream, 'file.txt');
+      });
+
+      manager.setConfig({
+        dev: createPasswordConfig({
+          name: 'dev',
+          commandWhitelist: ['^ls( .*)?$', '^cat .*'],
+        }),
+      });
+
+      const result = await manager.executeWhitelistedCommand('ls -al', undefined, 'dev');
+      assert.strictEqual(result, 'file.txt');
+      assert.strictEqual(client.execCalls.length, 1);
+    });
+
+    it('executeWhitelistedCommand 未命中白名单时抛 COMMAND_NOT_WHITELISTED', async () => {
+      manager.setConfig({
+        dev: createPasswordConfig({
+          name: 'dev',
+          commandWhitelist: ['^ls( .*)?$'],
+        }),
+      });
+
+      await assert.rejects(
+        () => manager.executeWhitelistedCommand('rm -rf /', undefined, 'dev'),
+        (error) => {
+          assert.ok(error instanceof ToolError);
+          assert.strictEqual(error.code, 'COMMAND_NOT_WHITELISTED');
+          assert.match(error.message, /whitelist/i);
+          return true;
+        },
+      );
+    });
+
+    it('executeWhitelistedCommand 未配置白名单时抛 COMMAND_NOT_WHITELISTED', async () => {
+      manager.setConfig({
+        dev: createPasswordConfig({ name: 'dev' }),
+      });
+
+      await assert.rejects(
+        () => manager.executeWhitelistedCommand('ls', undefined, 'dev'),
+        (error) => {
+          assert.ok(error instanceof ToolError);
+          assert.strictEqual(error.code, 'COMMAND_NOT_WHITELISTED');
+          return true;
+        },
+      );
+    });
+
+    it('executeWhitelistedCommand 命中白名单但命中黑名单仍抛 COMMAND_VALIDATION_FAILED', async () => {
+      manager.setConfig({
+        dev: createPasswordConfig({
+          name: 'dev',
+          commandWhitelist: ['^rm .*'],
+          commandBlacklist: ['^rm -rf .*'],
+        }),
+      });
+
+      await assert.rejects(
+        () => manager.executeWhitelistedCommand('rm -rf /', undefined, 'dev'),
+        (error) => {
+          assert.ok(error instanceof ToolError);
+          assert.strictEqual(error.code, 'COMMAND_VALIDATION_FAILED');
+          return true;
+        },
+      );
+    });
+
+    it('executeCommand 不再拦截白名单外的命令（审批模式）', async () => {
+      const stream = new FakeExecStream();
+      createExecClient(({ callback }) => {
+        callback(undefined, stream);
+        emitSuccess(stream, 'ok');
+      });
+
+      manager.setConfig({
+        dev: createPasswordConfig({
+          name: 'dev',
+          commandWhitelist: ['^ls( .*)?$'],
+        }),
+      });
+
+      const result = await manager.executeCommand('rm -rf /tmp/x', undefined, 'dev');
+      assert.strictEqual(result, 'ok');
+    });
+
+    it('executeCommand 仍拦截命中黑名单的命令', async () => {
+      manager.setConfig({
+        dev: createPasswordConfig({
+          name: 'dev',
+          commandBlacklist: ['^rm '],
+        }),
+      });
+
+      await assert.rejects(
+        () => manager.executeCommand('rm -rf /tmp/x', undefined, 'dev'),
+        (error) => {
+          assert.ok(error instanceof ToolError);
+          assert.strictEqual(error.code, 'COMMAND_VALIDATION_FAILED');
+          return true;
+        },
+      );
+    });
+  });
 });

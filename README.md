@@ -46,7 +46,8 @@ NPM: [https://www.npmjs.com/package/@fangjunjie/ssh-mcp-server](https://www.npmj
 
 | 工具 | 名称 | 描述 |
 |---------|-----------|----------|
-| execute-command | 命令执行工具 | 在远程服务器上执行 SSH 命令并获取执行结果 |
+| execute-command | 命令执行工具（审批） | 在远程服务器上执行 SSH 命令并获取执行结果，调用时需客户端弹窗确认 |
+| run-whitelisted-command | 白名单命令直行工具 | 仅执行命中白名单的命令；配合客户端 allowlist 可免弹窗直行 |
 | upload | 文件上传工具 | 将本地文件上传到远程服务器指定位置 |
 | download | 文件下载工具 | 从远程服务器下载文件到本地指定位置 |
 | list-servers | 服务器列表工具 | 列出所有可用SSH服务器配置 |
@@ -221,6 +222,9 @@ HTTP 和 HTTPS 代理通过 `CONNECT` 方法建立到 SSH 服务的隧道，用�
 
 通过 `--whitelist` 和 `--blacklist` 限制服务器允许执行的命令范围。多个模式之间用逗号分隔，每个模式都是一个正则表达式。**生产环境强烈建议配置**。
 
+- **`--whitelist`（白名单）**：定义「免确认直行」的命令集合。命中白名单的命令可通过 `run-whitelisted-command` 免弹窗直接执行。
+- **`--blacklist`（黑名单）**：硬拦截。无论走哪个工具、是否人工确认，命中黑名单的命令一律拒绝。
+
 白名单示例（仅允许只读型查看命令）：
 
 ```json
@@ -263,7 +267,30 @@ HTTP 和 HTTPS 代理通过 `CONNECT` 方法建立到 SSH 服务的隧道，用�
 }
 ```
 
-> 注意：如果同时指定了白名单和黑名单，系统会先检查命令是否在白名单中，再检查是否在黑名单中，命令必须同时通过两项检查才能被执行。
+> 注意：如果同时指定了白名单和黑名单，两条规则都会生效：白名单决定哪些命令可免确认直行，黑名单则对任何命令（含白名单内）进行硬拦截。
+
+#### 🚀 免确认直行 + 弹窗审批（推荐用法）
+
+MCP 服务器本身无法触发 Claude Code 的权限弹窗——弹窗完全由客户端控制。为了让「白名单内免确认、白名单外弹窗询问」，命令执行拆成了两个工具：
+
+| 工具 | 行为 | 何时弹窗 |
+|---|---|---|
+| `run-whitelisted-command` | **必须**命中该连接的白名单，否则返回 `COMMAND_NOT_WHITELISTED` | 加入客户端 allowlist 后**永不弹窗**；未命中则被服务器拒绝，不会执行 |
+| `execute-command` | 执行任意命令（黑名单除外），白名单不再拦截 | 每次调用都会**弹窗**，人工确认后执行 |
+
+在 Claude Code 中把 `run-whitelisted-command` 加入 `permissions.allow`，常用命令即可免弹窗直行：
+
+```json
+{
+  "permissions": {
+    "allow": ["mcp__ssh-mcp-server__run-whitelisted-command"]
+  }
+}
+```
+
+工作流程：日常操作优先用 `run-whitelisted-command` → 命中白名单则免弹窗直行；未命中返回 `COMMAND_NOT_WHITELISTED`，Claude 改用 `execute-command` → Claude Code 弹窗 → 人工确认后执行。黑名单命令无论哪条路径都被拒绝。
+
+> **⚠️ 注意**：`commandWhitelist` 的语义是「免确认名单」——不在白名单的命令不会被硬拦截，而是走 `execute-command` 弹窗审批；硬拦截请使用 `commandBlacklist`。服务端始终是白名单的唯一事实来源，因此即使 `run-whitelisted-command` 被 allowlist，也无法执行白名单之外的命令。
 
 ### 7. 🧩 使用命令模板包裹命令
 
@@ -606,7 +633,7 @@ npx @fangjunjie/ssh-mcp-server \
 
 该服务器提供了在远程服务器上执行命令和传输文件的强大功能。为确保安全使用，请注意以下几点：
 
-- **命令白名单**：*强烈建议* 使用 `--whitelist` 选项来限制可执行的命令集合。如果没有白名单，任何命令都可以在远程服务器上执行，这可能带来重大的安全风险。
+- **命令白名单**：*强烈建议* 使用 `--whitelist` 限定「免确认直行」的命令集合，并只在客户端为 `run-whitelisted-command` 配置 allowlist；白名单之外的命令会走 `execute-command` 弹窗审批。**硬拦截**危险命令请配置 `commandBlacklist`，它是唯一能无条件阻止命令执行的机制。完全没有限制时，任何命令都可能被执行。
 - **私钥安全**：服务器会将 SSH 私钥读入内存。请确保运行 `ssh-mcp-server` 的机器是安全的。不要将服务器暴露给不受信任的网络。
 - **拒绝服务攻击 (DoS)**：服务器没有内置的速率限制。攻击者可能通过向服务器发送大量连接请求或大文件传输来发起 DoS 攻击。建议在具有速率限制功能的防火墙或反向代理后面运行服务器。
 - **路径遍历**：服务器内置了对本地文件系统路径遍历攻击的保护。但是，仍然需要注意在 `upload` 和 `download` 命令中使用的路径。

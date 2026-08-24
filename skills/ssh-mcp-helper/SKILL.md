@@ -80,7 +80,7 @@ digraph ssh_mcp_helper {
 
 ### Step 5：高级选项（每项独立用 AskUserQuestion 询问是/否）
 1. SOCKS 代理：是 → 追问 `--socksProxy` 字符串
-2. 命令白名单：是 → 追问逗号分隔正则（**生产环境强烈建议开启**）
+2. 命令白名单：是 → 追问逗号分隔正则（**生产环境强烈建议开启**）；若客户端是 Claude Code，再询问是否把 `run-whitelisted-command` 加入 `permissions.allow`，让命中白名单的命令免弹窗直行
 3. 命令黑名单：是 → 追问逗号分隔正则
 4. 命令模板：是 → 追问含 `<command>` 占位符的模板
 5. 传输模式：默认 `exec`；若用户标记目标为堡垒机/跳板机，改 `shell` 并追问 `--shell-ready-timeout`
@@ -93,6 +93,7 @@ digraph ssh_mcp_helper {
 - `args` 第一项 `"-y"`，第二项 `"@fangjunjie/ssh-mcp-server"`
 - **每个命令行参数与值必须是 args 数组中独立的两个元素**，绝不能写成 `"--host 192.168.1.1"`
 - 多连接场景：把每个连接写入 `ssh-config.json`（数组或对象格式皆可），客户端配置里只放 `--config-file <绝对路径>`
+- 若客户端为 Claude Code 且启用了命令白名单，另产出 `permissions.allow` 片段：`{ "permissions": { "allow": ["mcp__ssh-mcp-server__run-whitelisted-command"] } }`，可写入项目 `.claude/settings.json` 或全局 `~/.claude/settings.json`，让命中白名单的命令免弹窗直行
 
 ### Step 7：合并写入配置
 - 先用 Read 读取目标 JSON 配置文件
@@ -117,6 +118,7 @@ digraph ssh_mcp_helper {
 | 2FA / MFA | `--try-keyboard`（搭配密码 + 私钥） |
 | 命令白名单 | `--whitelist "^ls( .*)?,^cat .*"` |
 | 命令黑名单 | `--blacklist "^rm .*,^shutdown.*"` |
+| 白名单免弹窗直行（Claude Code） | `--whitelist ...` + `permissions.allow` 加 `mcp__ssh-mcp-server__run-whitelisted-command` |
 | 命令模板 | `--command-template "su root -c '<command>'"` |
 | 路径白名单 | `--allowed-local-paths` / `--allowed-remote-paths` |
 
@@ -127,6 +129,7 @@ digraph ssh_mcp_helper {
 - ❌ `shell` 模式下还想用 `upload`/`download` → 该模式禁用 SFTP，需切回 `exec`
 - ❌ 直接覆盖用户既有 `mcpServers` 中的同名 key → 必须先读后合并，覆盖前显式确认
 - ❌ 直连生产环境却未配置 `--whitelist` / `--blacklist` → 必须主动提醒安全风险
+- ❌ 以为 `--whitelist` 是硬边界 → 白名单之外的命令现在走 `execute-command` 弹窗审批，不会被执行时硬拦截；要硬拦截请用 `--blacklist`
 - ❌ 把私钥内容粘进配置 → 配置里应填**私钥文件路径**，凭据留在本地
 
 ## 输出示例

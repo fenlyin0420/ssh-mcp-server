@@ -42,7 +42,8 @@ NPM: [https://www.npmjs.com/package/@fangjunjie/ssh-mcp-server](https://www.npmj
 
 | Tool | Name | Description |
 |---------|-----------|----------|
-| execute-command | Command Execution Tool | Execute SSH commands on remote servers and get results |
+| execute-command | Command Execution Tool (approval) | Execute SSH commands on remote servers and get results; requires a client approval prompt per call |
+| run-whitelisted-command | Whitelisted Command Tool | Executes only commands matching the connection's whitelist; pair with a client allowlist to run without a prompt |
 | upload | File Upload Tool | Upload local files to specified locations on remote servers |
 | download | File Download Tool | Download files from remote servers to local specified locations |
 | list-servers | List Servers Tool | List all available SSH server configurations |
@@ -217,6 +218,9 @@ The existing `socksProxy` configuration and `--socksProxy` option remain support
 
 Use `--whitelist` and `--blacklist` to limit which commands the server is allowed to run. Patterns are comma-separated regular expressions. **Strongly recommended** for any production use.
 
+- **`--whitelist`**: defines the set of commands that run *without approval*. Commands matching the whitelist can be executed directly via the `run-whitelisted-command` tool.
+- **`--blacklist`**: a hard boundary. Commands matching the blacklist are always rejected — regardless of which tool is used or whether a human approved.
+
 Whitelist example (only allow read-only inspection commands):
 
 ```json
@@ -259,7 +263,30 @@ Blacklist example (block destructive commands):
 }
 ```
 
-> Note: If both whitelist and blacklist are specified, the command must pass both checks (whitelist first, then blacklist) to be executed.
+> Note: If both whitelist and blacklist are specified, both rules apply: the whitelist decides which commands run without approval, while the blacklist hard-blocks any command (including whitelisted ones).
+
+#### 🚀 Run Without Prompt + Approve With Prompt (Recommended Workflow)
+
+An MCP server cannot trigger Claude Code's permission popup — the popup is controlled entirely by the client. To get "whitelisted commands run directly, everything else prompts", command execution is split into two tools:
+
+| Tool | Behavior | When it prompts |
+|---|---|---|
+| `run-whitelisted-command` | MUST match the connection's whitelist, otherwise fails with `COMMAND_NOT_WHITELISTED` | **Never prompts** once allowlisted in the client; non-matching commands are rejected by the server and never run |
+| `execute-command` | Runs any command (except blacklisted); the whitelist no longer blocks it | **Prompts every time**; runs after a human approves |
+
+In Claude Code, add `run-whitelisted-command` to `permissions.allow` so routine commands run without a prompt:
+
+```json
+{
+  "permissions": {
+    "allow": ["mcp__ssh-mcp-server__run-whitelisted-command"]
+  }
+}
+```
+
+Workflow: prefer `run-whitelisted-command` for routine operations → if the command matches the whitelist it runs immediately; otherwise it returns `COMMAND_NOT_WHITELISTED` and Claude falls back to `execute-command` → Claude Code prompts → the command runs after approval. Blacklisted commands are rejected on every path.
+
+> **⚠️ Note**: `commandWhitelist` is a *no-approval* allowlist — commands outside it are not hard-blocked; they route to `execute-command` for a prompt. Use `commandBlacklist` for hard blocking. The server is always the single source of truth for the whitelist, so allowlisting `run-whitelisted-command` can never execute commands outside the whitelist.
 
 ### 7. 🧩 Wrapping Commands With a Template
 
@@ -600,7 +627,7 @@ Options:
 
 This server provides powerful capabilities to execute commands and transfer files on remote servers. To ensure it is used securely, please consider the following:
 
-- **Command Whitelisting**: It is *strongly recommended* to use the `--whitelist` option to restrict the set of commands that can be executed. Without a whitelist, any command can be executed on the remote server, which can be a significant security risk.
+- **Command Whitelisting**: It is *strongly recommended* to use `--whitelist` to define the set of commands that run without approval, and only allowlist `run-whitelisted-command` in the client. Commands outside the whitelist route to `execute-command` for a prompt. For **hard blocking**, configure `commandBlacklist` — it is the only mechanism that unconditionally prevents a command from running. With no restrictions at all, any command can be executed.
 - **Private Key Security**: The server reads the SSH private key into memory. Ensure that the machine running the `ssh-mcp-server` is secure. Do not expose the server to untrusted networks.
 - **Denial of Service (DoS)**: The server does not have built-in rate limiting. An attacker could potentially launch a DoS attack by flooding the server with connection requests or large file transfers. It is recommended to run the server behind a firewall or reverse proxy with rate-limiting capabilities.
 - **Path Traversal**: The server has built-in protection against path traversal attacks on the local filesystem. However, it is still important to be mindful of the paths used in `upload` and `download` commands.
