@@ -36,7 +36,6 @@ const expectedHelpOptions = [
   '--command-template <template>',
   '--pty',
   '--try-keyboard',
-  '--pre-connect',
   '--version, -v',
   '--help',
 ];

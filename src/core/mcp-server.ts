@@ -114,20 +114,7 @@ export class SshMcpServer {
       );
     }
 
-    // Pre-connect to all servers if flag is set
-    if (parsedArgs.preConnect) {
-      Logger.log("Pre-connecting to all configured SSH servers...", "info");
-      void this.sshManager
-        .connectAll()
-        .then(() => {
-          Logger.log("Successfully pre-connected to all SSH servers", "info");
-        })
-        .catch((error) => {
-          Logger.log(
-            `Warning: Some SSH connections failed during pre-connect: ${(error as Error).message}`,
-            "error"
-          );
-        });
-    }
+    // SSH connections are established lazily when tools are invoked,
+    // so the MCP server can start without requiring VPN or network access.
   }
 }

@@ -1,17 +1,17 @@
 {
-  "name": "@fangjunjie/ssh-mcp-server",
-  "version": "1.8.8",
+  "name": "@fenlyin/ssh-mcp-server",
+  "version": "1.0.0",
   "description": "SSH-based MCP Server (基于 SSH 的 MCP 服务器)",
   "main": "build/index.js",
   "type": "module",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/classfang/ssh-mcp-server.git"
+    "url": "git+https://github.com/fenlyin0420/ssh-mcp-server.git"
   },
   "bugs": {
-    "url": "https://github.com/classfang/ssh-mcp-server/issues"
+    "url": "https://github.com/fenlyin0420/ssh-mcp-server/issues"
   },
-  "homepage": "https://github.com/classfang/ssh-mcp-server#readme",
+  "homepage": "https://github.com/fenlyin0420/ssh-mcp-server#readme",
   "bin": {
     "ssh-mcp-server": "build/index.js"
   },
@@ -27,7 +27,7 @@
     "server",
     "cli"
   ],
-  "author": "Junki",
+  "author": "fenlyin0420",
   "license": "ISC",
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.27.0",

@@ -4,13 +4,13 @@
 
 # ssh-mcp-server
 
-![NPM Version](https://img.shields.io/npm/v/%40fangjunjie%2Fssh-mcp-server?label=%40fangjunjie%2Fssh-mcp-server)
-![GitHub forks](https://img.shields.io/github/forks/classfang/ssh-mcp-server)
-![GitHub Repo stars](https://img.shields.io/github/stars/classfang/ssh-mcp-server)
-![GitHub Issues or Pull Requests](https://img.shields.io/github/issues/classfang/ssh-mcp-server)
-![GitHub Issues or Pull Requests](https://img.shields.io/github/issues-closed/classfang/ssh-mcp-server)
-![GitHub Issues or Pull Requests](https://img.shields.io/github/issues-pr/classfang/ssh-mcp-server)
-![GitHub Issues or Pull Requests](https://img.shields.io/github/issues-pr-closed/classfang/ssh-mcp-server)
+![NPM Version](https://img.shields.io/npm/v/%40fenlyin%2Fssh-mcp-server?label=%40fenlyin%2Fssh-mcp-server)
+![GitHub forks](https://img.shields.io/github/forks/fenlyin0420/ssh-mcp-server)
+![GitHub Repo stars](https://img.shields.io/github/stars/fenlyin0420/ssh-mcp-server)
+![GitHub Issues or Pull Requests](https://img.shields.io/github/issues/fenlyin0420/ssh-mcp-server)
+![GitHub Issues or Pull Requests](https://img.shields.io/github/issues-closed/fenlyin0420/ssh-mcp-server)
+![GitHub Issues or Pull Requests](https://img.shields.io/github/issues-pr/fenlyin0420/ssh-mcp-server)
+![GitHub Issues or Pull Requests](https://img.shields.io/github/issues-pr-closed/fenlyin0420/ssh-mcp-server)
 
 基于 SSH 的 MCP (Model Context Protocol) 服务器，允许通过 MCP 协议远程执行 SSH 命令。
 
@@ -38,9 +38,9 @@ ssh-mcp-server 是一个桥接工具，可以让 AI 助手等支持 MCP 协议�
 
 ## 📦 开源仓库
 
-GitHub：[https://github.com/classfang/ssh-mcp-server](https://github.com/classfang/ssh-mcp-server)
+GitHub：[https://github.com/fenlyin0420/ssh-mcp-server](https://github.com/fenlyin0420/ssh-mcp-server)
 
-NPM: [https://www.npmjs.com/package/@fangjunjie/ssh-mcp-server](https://www.npmjs.com/package/@fangjunjie/ssh-mcp-server)
+NPM: [https://www.npmjs.com/package/@fenlyin/ssh-mcp-server](https://www.npmjs.com/package/@fenlyin/ssh-mcp-server)
 
 ## 🛠️ 工具列表
 
@@ -81,7 +81,7 @@ NPM: [https://www.npmjs.com/package/@fangjunjie/ssh-mcp-server](https://www.npmj
       "command": "npx",
       "args": [
         "-y",
-        "@fangjunjie/ssh-mcp-server",
+        "@fenlyin/ssh-mcp-server",
         "--host", "192.168.1.1",
         "--port", "22",
         "--username", "root",
@@ -101,7 +101,7 @@ NPM: [https://www.npmjs.com/package/@fangjunjie/ssh-mcp-server](https://www.npmj
       "command": "npx",
       "args": [
         "-y",
-        "@fangjunjie/ssh-mcp-server",
+        "@fenlyin/ssh-mcp-server",
         "--host", "192.168.1.1",
         "--port", "22",
         "--username", "root",
@@ -121,7 +121,7 @@ NPM: [https://www.npmjs.com/package/@fangjunjie/ssh-mcp-server](https://www.npmj
       "command": "npx",
       "args": [
         "-y",
-        "@fangjunjie/ssh-mcp-server",
+        "@fenlyin/ssh-mcp-server",
         "--host", "192.168.1.1",
         "--port", "22",
         "--username", "root",
@@ -144,7 +144,7 @@ NPM: [https://www.npmjs.com/package/@fangjunjie/ssh-mcp-server](https://www.npmj
       "command": "npx",
       "args": [
         "-y",
-        "@fangjunjie/ssh-mcp-server",
+        "@fenlyin/ssh-mcp-server",
         "--host", "myserver"
       ]
     }
@@ -171,7 +171,7 @@ Host myserver
       "command": "npx",
       "args": [
         "-y",
-        "@fangjunjie/ssh-mcp-server",
+        "@fenlyin/ssh-mcp-server",
         "--host", "myserver",
         "--ssh-config-file", "/path/to/custom/ssh_config"
       ]
@@ -193,7 +193,7 @@ Host myserver
       "command": "npx",
       "args": [
         "-y",
-        "@fangjunjie/ssh-mcp-server",
+        "@fenlyin/ssh-mcp-server",
         "--host", "192.168.1.1",
         "--port", "22",
         "--username", "root",
@@ -234,7 +234,7 @@ HTTP 和 HTTPS 代理通过 `CONNECT` 方法建立到 SSH 服务的隧道，用�
       "command": "npx",
       "args": [
         "-y",
-        "@fangjunjie/ssh-mcp-server",
+        "@fenlyin/ssh-mcp-server",
         "--host", "192.168.1.1",
         "--port", "22",
         "--username", "root",
@@ -255,7 +255,7 @@ HTTP 和 HTTPS 代理通过 `CONNECT` 方法建立到 SSH 服务的隧道，用�
       "command": "npx",
       "args": [
         "-y",
-        "@fangjunjie/ssh-mcp-server",
+        "@fenlyin/ssh-mcp-server",
         "--host", "192.168.1.1",
         "--port", "22",
         "--username", "root",
@@ -303,7 +303,7 @@ MCP 服务器本身无法触发 Claude Code 的权限弹窗——弹窗完全由
       "command": "npx",
       "args": [
         "-y",
-        "@fangjunjie/ssh-mcp-server",
+        "@fenlyin/ssh-mcp-server",
         "--host", "10.0.0.1",
         "--port", "22",
         "--username", "deploy",
@@ -349,7 +349,7 @@ ssh jumphost <quotedCommand>
       "command": "npx",
       "args": [
         "-y",
-        "@fangjunjie/ssh-mcp-server",
+        "@fenlyin/ssh-mcp-server",
         "--host", "bastion.example.com",
         "--port", "22",
         "--username", "ops",
@@ -375,7 +375,7 @@ JSON 配置文件中还可以通过 `shellCommandTimeoutMs` 覆盖 shell 模式�
       "command": "npx",
       "args": [
         "-y",
-        "@fangjunjie/ssh-mcp-server",
+        "@fenlyin/ssh-mcp-server",
         "--host", "example.com",
         "--port", "22",
         "--username", "user",
@@ -487,7 +487,7 @@ JSON 配置文件中还可以通过 `shellCommandTimeoutMs` 覆盖 shell 模式�
       "command": "npx",
       "args": [
         "-y",
-        "@fangjunjie/ssh-mcp-server",
+        "@fenlyin/ssh-mcp-server",
         "--config-file", "ssh-config.json"
       ]
     }
@@ -506,7 +506,7 @@ JSON 配置文件中还可以通过 `shellCommandTimeoutMs` 覆盖 shell 模式�
       "command": "npx",
       "args": [
         "-y",
-        "@fangjunjie/ssh-mcp-server",
+        "@fenlyin/ssh-mcp-server",
         "--ssh", "{\"name\":\"dev\",\"host\":\"1.2.3.4\",\"port\":22,\"username\":\"alice\",\"password\":\"{abc=P100s0}\",\"socksProxy\":\"socks://127.0.0.1:10808\"}",
         "--ssh", "{\"name\":\"bastion\",\"host\":\"9.9.9.9\",\"port\":22,\"username\":\"ops\",\"password\":\"pwd123456\",\"transportMode\":\"shell\",\"shellReadyTimeoutMs\":15000}",
         "--ssh", "{\"name\":\"prod\",\"host\":\"5.6.7.8\",\"port\":22,\"username\":\"bob\",\"password\":\"yyy\",\"socksProxy\":\"socks://127.0.0.1:10808\"}"
@@ -521,7 +521,7 @@ JSON 配置文件中还可以通过 `shellCommandTimeoutMs` 覆盖 shell 模式�
 对于密码中不包含特殊字符的简单情况，仍可使用旧格式：
 
 ```bash
-npx @fangjunjie/ssh-mcp-server \
+npx @fenlyin/ssh-mcp-server \
   --ssh "name=dev,host=1.2.3.4,port=22,user=alice,password=xxx" \
   --ssh "name=prod,host=5.6.7.8,port=22,user=bob,password=yyy"
 ```
@@ -644,4 +644,4 @@ npx @fangjunjie/ssh-mcp-server \
 
 ## Star History
 
-[![Star History Chart](https://api.star-history.com/chart?repos=classfang/ssh-mcp-server&type=date&legend=top-left&sealed_token=ndORao73xOZgyX7IvlIIOynMoeEP5Ds9YAG-zOfMMBlNepLdP3e7T7k9K94X8TdvuxplN5DXLolbF9jFFsYDD-1V0V8HO6B3swaPOvJaonKeiFNdAuWsXg)](https://www.star-history.com/?type=date&legend=top-left&repos=classfang%2Fssh-mcp-server)
+[![Star History Chart](https://api.star-history.com/chart?repos=fenlyin0420/ssh-mcp-server&type=date&legend=top-left&sealed_token=ndORao73xOZgyX7IvlIIOynMoeEP5Ds9YAG-zOfMMBlNepLdP3e7T7k9K94X8TdvuxplN5DXLolbF9jFFsYDD-1V0V8HO6B3swaPOvJaonKeiFNdAuWsXg)](https://www.star-history.com/?type=date&legend=top-left&repos=fenlyin0420%2Fssh-mcp-server)

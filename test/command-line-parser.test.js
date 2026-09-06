@@ -459,13 +459,6 @@ Host minimalhost
       fs.unlinkSync(ptyConfigPath);
     });
 
-    it('应该正确解析 --pre-connect 选项', () => {
-      process.argv = ['node', 'test', '--host', '1.2.3.4', '--port', '22', '--username', 'user', '--password', 'pass', '--pre-connect'];
-      const result = CommandLineParser.parseArgs();
-
-      assert.strictEqual(result.preConnect, true);
-    });
-
     it('应该正确解析 SOCKS 代理', () => {
       process.argv = ['node', 'test', '--host', '1.2.3.4', '--port', '22', '--username', 'user', '--password', 'pass', '--socksProxy', 'socks://proxy:1080'];
       const result = CommandLineParser.parseArgs();

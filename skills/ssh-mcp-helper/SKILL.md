@@ -7,7 +7,7 @@ description: Use when 用户希望安装、配置或新增 ssh-mcp-server 的 MC
 
 ## 概述
 
-帮助用户通过交互式问答完成 `@fangjunjie/ssh-mcp-server` 的安装预检与 MCP 客户端配置。技能本身**不代替用户输入凭据**，而是逐项确认认证方式、连接参数与安全策略，最终产出可直接写入 MCP 客户端配置文件的 `mcpServers` JSON 片段。
+帮助用户通过交互式问答完成 `@fenlyin/ssh-mcp-server` 的安装预检与 MCP 客户端配置。技能本身**不代替用户输入凭据**，而是逐项确认认证方式、连接参数与安全策略，最终产出可直接写入 MCP 客户端配置文件的 `mcpServers` JSON 片段。
 
 **核心准则：** 所有可枚举的选项（MCP 客户端类型、认证方式、传输模式、是/否开关）必须使用 AskUserQuestion 让用户选择；只有不可枚举的输入（host、用户名、私钥路径、密码、自定义白名单正则等）才允许自由文本提问。
 
@@ -90,7 +90,7 @@ digraph ssh_mcp_helper {
 ### Step 6：生成 JSON 片段
 装配规则：
 - `command` 固定为 `"npx"`
-- `args` 第一项 `"-y"`，第二项 `"@fangjunjie/ssh-mcp-server"`
+- `args` 第一项 `"-y"`，第二项 `"@fenlyin/ssh-mcp-server"`
 - **每个命令行参数与值必须是 args 数组中独立的两个元素**，绝不能写成 `"--host 192.168.1.1"`
 - 多连接场景：把每个连接写入 `ssh-config.json`（数组或对象格式皆可），客户端配置里只放 `--config-file <绝对路径>`
 - 若客户端为 Claude Code 且启用了命令白名单，另产出 `permissions.allow` 片段：`{ "permissions": { "allow": ["mcp__ssh-mcp-server__run-whitelisted-command"] } }`，可写入项目 `.claude/settings.json` 或全局 `~/.claude/settings.json`，让命中白名单的命令免弹窗直行
@@ -143,7 +143,7 @@ digraph ssh_mcp_helper {
       "command": "npx",
       "args": [
         "-y",
-        "@fangjunjie/ssh-mcp-server",
+        "@fenlyin/ssh-mcp-server",
         "--host", "192.168.1.1",
         "--port", "22",
         "--username", "root",
@@ -162,7 +162,7 @@ digraph ssh_mcp_helper {
   "mcpServers": {
     "ssh-mcp-server": {
       "command": "npx",
-      "args": ["-y", "@fangjunjie/ssh-mcp-server", "--config-file", "/abs/path/ssh-config.json"]
+      "args": ["-y", "@fenlyin/ssh-mcp-server", "--config-file", "/abs/path/ssh-config.json"]
     }
   }
 }

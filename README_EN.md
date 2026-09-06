@@ -4,13 +4,13 @@
 
 # ssh-mcp-server
 
-![NPM Version](https://img.shields.io/npm/v/%40fangjunjie%2Fssh-mcp-server?label=%40fangjunjie%2Fssh-mcp-server)
-![GitHub forks](https://img.shields.io/github/forks/classfang/ssh-mcp-server)
-![GitHub Repo stars](https://img.shields.io/github/stars/classfang/ssh-mcp-server)
-![GitHub Issues or Pull Requests](https://img.shields.io/github/issues/classfang/ssh-mcp-server)
-![GitHub Issues or Pull Requests](https://img.shields.io/github/issues-closed/classfang/ssh-mcp-server)
-![GitHub Issues or Pull Requests](https://img.shields.io/github/issues-pr/classfang/ssh-mcp-server)
-![GitHub Issues or Pull Requests](https://img.shields.io/github/issues-pr-closed/classfang/ssh-mcp-server)
+![NPM Version](https://img.shields.io/npm/v/%40fenlyin%2Fssh-mcp-server?label=%40fenlyin%2Fssh-mcp-server)
+![GitHub forks](https://img.shields.io/github/forks/fenlyin0420/ssh-mcp-server)
+![GitHub Repo stars](https://img.shields.io/github/stars/fenlyin0420/ssh-mcp-server)
+![GitHub Issues or Pull Requests](https://img.shields.io/github/issues/fenlyin0420/ssh-mcp-server)
+![GitHub Issues or Pull Requests](https://img.shields.io/github/issues-closed/fenlyin0420/ssh-mcp-server)
+![GitHub Issues or Pull Requests](https://img.shields.io/github/issues-pr/fenlyin0420/ssh-mcp-server)
+![GitHub Issues or Pull Requests](https://img.shields.io/github/issues-pr-closed/fenlyin0420/ssh-mcp-server)
 
 SSH-based MCP (Model Context Protocol) server that allows remote execution of SSH commands via the MCP protocol.
 
@@ -34,9 +34,9 @@ ssh-mcp-server is a bridging tool that enables AI assistants and other applicati
 
 ## 📦 Open Source Repository
 
-GitHub: [https://github.com/classfang/ssh-mcp-server](https://github.com/classfang/ssh-mcp-server)
+GitHub: [https://github.com/fenlyin0420/ssh-mcp-server](https://github.com/fenlyin0420/ssh-mcp-server)
 
-NPM: [https://www.npmjs.com/package/@fangjunjie/ssh-mcp-server](https://www.npmjs.com/package/@fangjunjie/ssh-mcp-server)
+NPM: [https://www.npmjs.com/package/@fenlyin/ssh-mcp-server](https://www.npmjs.com/package/@fenlyin/ssh-mcp-server)
 
 ## 🛠️ Tools List
 
@@ -77,7 +77,7 @@ The sections below are arranged from the simplest entry point (username + passwo
       "command": "npx",
       "args": [
         "-y",
-        "@fangjunjie/ssh-mcp-server",
+        "@fenlyin/ssh-mcp-server",
         "--host", "192.168.1.1",
         "--port", "22",
         "--username", "root",
@@ -97,7 +97,7 @@ The sections below are arranged from the simplest entry point (username + passwo
       "command": "npx",
       "args": [
         "-y",
-        "@fangjunjie/ssh-mcp-server",
+        "@fenlyin/ssh-mcp-server",
         "--host", "192.168.1.1",
         "--port", "22",
         "--username", "root",
@@ -117,7 +117,7 @@ The sections below are arranged from the simplest entry point (username + passwo
       "command": "npx",
       "args": [
         "-y",
-        "@fangjunjie/ssh-mcp-server",
+        "@fenlyin/ssh-mcp-server",
         "--host", "192.168.1.1",
         "--port", "22",
         "--username", "root",
@@ -140,7 +140,7 @@ If you already have a host alias in `~/.ssh/config`, the server reads connection
       "command": "npx",
       "args": [
         "-y",
-        "@fangjunjie/ssh-mcp-server",
+        "@fenlyin/ssh-mcp-server",
         "--host", "myserver"
       ]
     }
@@ -167,7 +167,7 @@ You can also specify a custom SSH config file path:
       "command": "npx",
       "args": [
         "-y",
-        "@fangjunjie/ssh-mcp-server",
+        "@fenlyin/ssh-mcp-server",
         "--host", "myserver",
         "--ssh-config-file", "/path/to/custom/ssh_config"
       ]
@@ -189,7 +189,7 @@ When the target host is only reachable through a proxy, use `--proxy` with a SOC
       "command": "npx",
       "args": [
         "-y",
-        "@fangjunjie/ssh-mcp-server",
+        "@fenlyin/ssh-mcp-server",
         "--host", "192.168.1.1",
         "--port", "22",
         "--username", "root",
@@ -230,7 +230,7 @@ Whitelist example (only allow read-only inspection commands):
       "command": "npx",
       "args": [
         "-y",
-        "@fangjunjie/ssh-mcp-server",
+        "@fenlyin/ssh-mcp-server",
         "--host", "192.168.1.1",
         "--port", "22",
         "--username", "root",
@@ -251,7 +251,7 @@ Blacklist example (block destructive commands):
       "command": "npx",
       "args": [
         "-y",
-        "@fangjunjie/ssh-mcp-server",
+        "@fenlyin/ssh-mcp-server",
         "--host", "192.168.1.1",
         "--port", "22",
         "--username", "root",
@@ -299,7 +299,7 @@ Workflow: prefer `run-whitelisted-command` for routine operations → if the com
       "command": "npx",
       "args": [
         "-y",
-        "@fangjunjie/ssh-mcp-server",
+        "@fenlyin/ssh-mcp-server",
         "--host", "10.0.0.1",
         "--port", "22",
         "--username", "deploy",
@@ -345,7 +345,7 @@ Behavior differences:
       "command": "npx",
       "args": [
         "-y",
-        "@fangjunjie/ssh-mcp-server",
+        "@fenlyin/ssh-mcp-server",
         "--host", "bastion.example.com",
         "--port", "22",
         "--username", "ops",
@@ -371,7 +371,7 @@ When the SSH server requires multi-factor authentication (password + private key
       "command": "npx",
       "args": [
         "-y",
-        "@fangjunjie/ssh-mcp-server",
+        "@fenlyin/ssh-mcp-server",
         "--host", "example.com",
         "--port", "22",
         "--username", "user",
@@ -481,7 +481,7 @@ Then use the `--config-file` parameter:
       "command": "npx",
       "args": [
         "-y",
-        "@fangjunjie/ssh-mcp-server",
+        "@fenlyin/ssh-mcp-server",
         "--config-file", "ssh-config.json"
       ]
     }
@@ -500,7 +500,7 @@ You can pass JSON-formatted configuration strings directly:
       "command": "npx",
       "args": [
         "-y",
-        "@fangjunjie/ssh-mcp-server",
+        "@fenlyin/ssh-mcp-server",
         "--ssh", "{\"name\":\"dev\",\"host\":\"1.2.3.4\",\"port\":22,\"username\":\"alice\",\"password\":\"{abc=P100s0}\",\"socksProxy\":\"socks://127.0.0.1:10808\"}",
         "--ssh", "{\"name\":\"bastion\",\"host\":\"9.9.9.9\",\"port\":22,\"username\":\"ops\",\"password\":\"pwd123456\",\"transportMode\":\"shell\",\"shellReadyTimeoutMs\":15000}",
         "--ssh", "{\"name\":\"prod\",\"host\":\"5.6.7.8\",\"port\":22,\"username\":\"bob\",\"password\":\"yyy\",\"socksProxy\":\"socks://127.0.0.1:10808\"}"
@@ -515,7 +515,7 @@ You can pass JSON-formatted configuration strings directly:
 For simple cases without special characters in passwords, you can still use the legacy format:
 
 ```bash
-npx @fangjunjie/ssh-mcp-server \
+npx @fenlyin/ssh-mcp-server \
   --ssh "name=dev,host=1.2.3.4,port=22,user=alice,password=xxx" \
   --ssh "name=prod,host=5.6.7.8,port=22,user=bob,password=yyy"
 ```
@@ -638,4 +638,4 @@ This server provides powerful capabilities to execute commands and transfer file
 
 ## Star History
 
-[![Star History Chart](https://api.star-history.com/chart?repos=classfang/ssh-mcp-server&type=date&legend=top-left&sealed_token=ndORao73xOZgyX7IvlIIOynMoeEP5Ds9YAG-zOfMMBlNepLdP3e7T7k9K94X8TdvuxplN5DXLolbF9jFFsYDD-1V0V8HO6B3swaPOvJaonKeiFNdAuWsXg)](https://www.star-history.com/?type=date&legend=top-left&repos=classfang%2Fssh-mcp-server)
+[![Star History Chart](https://api.star-history.com/chart?repos=fenlyin0420/ssh-mcp-server&type=date&legend=top-left&sealed_token=ndORao73xOZgyX7IvlIIOynMoeEP5Ds9YAG-zOfMMBlNepLdP3e7T7k9K94X8TdvuxplN5DXLolbF9jFFsYDD-1V0V8HO6B3swaPOvJaonKeiFNdAuWsXg)](https://www.star-history.com/?type=date&legend=top-left&repos=fenlyin0420%2Fssh-mcp-server)

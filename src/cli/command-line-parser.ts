@@ -110,7 +110,6 @@ export class CommandLineParser {
         "command-template": { type: "string" },
         pty: { type: "boolean" },
         "try-keyboard": { type: "boolean" },
-        "pre-connect": { type: "boolean" },
       },
       allowPositionals: true,
     });
@@ -280,7 +279,6 @@ export class CommandLineParser {
 
     return {
       configs: configMap,
-      preConnect: values["pre-connect"] === true,
     };
   }
 
