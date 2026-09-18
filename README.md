@@ -614,7 +614,7 @@ npx @fenlyin/ssh-mcp-server \
 | 参数 | 作用 |
 |---|---|
 | `--allow-adhoc-hosts` | 总开关（默认关闭）。不开时调用带 `host` 会被明确拒绝，而不是静默连到默认主机 |
-| `--adhoc-host-patterns <globs>` | 把「任意主机」收窄成允许名单，例如 `192.168.*,esc,xxfwq`；支持 `*`/`?` 通配和 `!` 取反，匹配的是 **SSH config 解析后的实际地址**（防止别名指向别处绕过限制） |
+| `--adhoc-host-patterns <globs>` | 把「任意主机」收窄成允许名单，例如 `192.168.*,esc,xxfwq`；支持 `*`/`?` 通配和 `!` 取反，匹配的是 **SSH config 解析后的实际地址**（防止别名指向别处绕过限制）。与 SSH config 的 Host 匹配一样**区分大小写** |
 | `--adhoc-allow-password-auth` | ad-hoc 主机**默认不继承密码**（密码会被发往调用方指定的任意主机）。只使用密钥/Agent 时无需理会；确实要用密码认证再打开 |
 | `--adhoc-transport-mode <exec\|shell>` | ad-hoc 主机默认继承启动时的 transport 模式，需要单独指定时用它覆盖 |
 

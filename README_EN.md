@@ -608,7 +608,7 @@ In other words: **host-specific knowledge from the SSH config wins, everything e
 | Flag | Effect |
 |---|---|
 | `--allow-adhoc-hosts` | Master switch (default off). While off, a call carrying `host` is rejected explicitly instead of silently running on the default host |
-| `--adhoc-host-patterns <globs>` | Narrows "any host" to an allowlist, e.g. `192.168.*,esc,xxfwq`; supports `*`/`?` globs and `!` negation, matched against the **resolved destination** (so an alias cannot point somewhere else to bypass it) |
+| `--adhoc-host-patterns <globs>` | Narrows "any host" to an allowlist, e.g. `192.168.*,esc,xxfwq`; supports `*`/`?` globs and `!` negation, matched against the **resolved destination** (so an alias cannot point somewhere else to bypass it). Matching is **case-sensitive**, like SSH config Host patterns |
 | `--adhoc-allow-password-auth` | Ad-hoc hosts do **not** inherit the password by default (it would be sent to whatever host the caller names). Not needed for key/agent setups |
 | `--adhoc-transport-mode <exec\|shell>` | Ad-hoc hosts inherit the startup transport mode; use this to override it |
 

@@ -267,7 +267,7 @@ describe('Ad-hoc 主机解析', () => {
 
   describe('连接 key', () => {
     it('buildAdhocKey 与 parseAdhocKey 可往返，含 IPv6', () => {
-      const key = buildAdhocKey('Esc', 22, 'root');
+      const key = buildAdhocKey('esc', 22, 'root');
       assert.strictEqual(key, 'adhoc:esc:22:root');
 
       const parts = parseAdhocKey(key);
@@ -287,6 +287,30 @@ describe('Ad-hoc 主机解析', () => {
 
     it('非 ad-hoc key 返回 null', () => {
       assert.strictEqual(parseAdhocKey('dev'), null);
+    });
+
+    it('大小写不同的拼写不共用连接（别名匹配大小写敏感）', () => {
+      // 小写命中别名并解析到 HostName，大写不命中，两者目标不同 → key 必须不同
+      const lower = resolveAdhocTarget(
+        { host: 'alias-a' },
+        basePassword(),
+        policy({ allowPasswordAuth: true }),
+      );
+      const upper = resolveAdhocTarget(
+        { host: 'ALIAS-A' },
+        basePassword(),
+        policy({ allowPasswordAuth: true }),
+      );
+
+      assert.strictEqual(lower.config.host, '10.9.9.9');
+      assert.strictEqual(upper.config.host, 'ALIAS-A');
+      assert.notStrictEqual(lower.key, upper.key);
+    });
+
+    it('主机允许名单同样大小写敏感', () => {
+      assert.strictEqual(isHostAllowed('esc', ['esc']), true);
+      assert.strictEqual(isHostAllowed('ESC', ['esc']), false);
+      assert.strictEqual(isHostAllowed('ESC', ['ESC']), true);
     });
   });
 });

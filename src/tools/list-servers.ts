@@ -32,10 +32,14 @@ export function formatServerList(
   }
 
   const lines: string[] = [];
+  const hasServers = servers.length > 0;
 
-  if (servers.length === 0) {
-    lines.push("No SSH servers configured.");
-  } else {
+  if (!hasServers && sshConfigHosts.length > 0) {
+    // 只开了 ad-hoc 的部署里，别说「没有配置」——可用目标就在下面
+    lines.push(
+      "No servers are configured at startup; these hosts can be targeted with the 'host' parameter:",
+    );
+  } else if (hasServers) {
     lines.push("Configured SSH servers:");
     for (const server of servers) {
       const parts = [
@@ -60,14 +64,16 @@ export function formatServerList(
   }
 
   if (sshConfigHosts.length > 0) {
-    lines.push(
-      "",
-      "Hosts from the SSH config, usable as the 'host' parameter:",
-      ...sshConfigHosts.map((host) => `  - ${host}`),
-    );
+    if (hasServers) {
+      // 有配置连接时单独起一段；只有 ad-hoc 时紧跟在上面的引导语后面
+      lines.push("", "Hosts from the SSH config, usable as the 'host' parameter:");
+    }
+    lines.push(...sshConfigHosts.map((host) => `  - ${host}`));
   }
 
-  lines.push("", "Raw JSON:", JSON.stringify(servers, null, 2));
+  if (hasServers) {
+    lines.push("", "Raw JSON:", JSON.stringify(servers, null, 2));
+  }
 
   return lines.join("\n");
 }

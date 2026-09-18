@@ -699,6 +699,18 @@ Host minimalhost
       assert.strictEqual(CommandLineParser.parseArgs().adhoc.allowPasswordAuth, true);
     });
 
+    it('布尔开关不接受取值', () => {
+      for (const flag of ['--allow-adhoc-hosts', '--adhoc-allow-password-auth']) {
+        process.argv = ['node', 'test', flag, 'false'];
+
+        assert.throws(
+          () => CommandLineParser.parseArgs(),
+          /is a boolean flag and does not take a value/,
+          `${flag} false 应该报错而不是把 false 当成主机名`,
+        );
+      }
+    });
+
     it('未开启 ad-hoc 时不返回策略对象', () => {
       process.argv = ['node', 'test', '--host', '1.2.3.4', '--username', 'root', '--privateKey', '~/.ssh/id_rsa'];
 

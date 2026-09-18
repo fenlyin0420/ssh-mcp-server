@@ -37,13 +37,17 @@ export function isAdhocKey(key: string): boolean {
 /**
  * Connection key for an ad-hoc target, built from the *requested* host so it
  * stays stable and readable in list-servers even if ~/.ssh/config changes.
+ *
+ * The host is used verbatim (no case folding): alias matching against
+ * ~/.ssh/config is case-sensitive, so two spellings may well resolve to
+ * different destinations and must not share a connection.
  */
 export function buildAdhocKey(
   requestedHost: string,
   port: number,
   username: string,
 ): string {
-  return `${ADHOC_KEY_PREFIX}${requestedHost.toLowerCase()}:${port}:${username}`;
+  return `${ADHOC_KEY_PREFIX}${requestedHost}:${port}:${username}`;
 }
 
 export interface AdhocKeyParts {
@@ -77,22 +81,23 @@ export function parseAdhocKey(key: string): AdhocKeyParts | null {
 /**
  * Match a host against ad-hoc host patterns.
  *
- * Patterns use ssh-config glob syntax (`*`, `?`), are anchored and
- * case-insensitive, and support `!` negation. An empty pattern list allows any
- * host.
+ * Patterns use ssh-config glob syntax (`*`, `?`), are anchored, support `!`
+ * negation, and — like ~/.ssh/config Host patterns — are matched
+ * case-sensitively, so a pattern cannot accidentally admit a differently-cased
+ * spelling that resolves somewhere else. An empty pattern list allows any host.
  */
 export function isHostAllowed(host: string, patterns?: string[]): boolean {
   if (!patterns || patterns.length === 0) {
     return true;
   }
 
-  const target = host.toLowerCase();
+  const target = host;
   let matchedPositive = false;
   let hasPositivePattern = false;
 
   for (const pattern of patterns) {
     const isNegated = pattern.startsWith("!");
-    const body = (isNegated ? pattern.slice(1) : pattern).toLowerCase();
+    const body = isNegated ? pattern.slice(1) : pattern;
 
     if (!body) {
       continue;

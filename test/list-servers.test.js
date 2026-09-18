@@ -49,11 +49,32 @@ describe('List Servers Tool', () => {
   });
 
   it('可以列出 SSH config 中可用的主机', () => {
-    const output = formatServerList([], { sshConfigHosts: ['esc', 'root@xxfwq'] });
+    const output = formatServerList(
+      [
+        {
+          name: 'dev',
+          host: '192.168.1.100',
+          port: 22,
+          username: 'root',
+          connected: false,
+          adhoc: false,
+        },
+      ],
+      { sshConfigHosts: ['esc', 'root@xxfwq'] },
+    );
 
     assert.match(output, /Hosts from the SSH config/);
     assert.match(output, /- esc/);
     assert.match(output, /- root@xxfwq/);
+  });
+
+  it('只开 ad-hoc 时不说「没有配置」，直接给出可用主机', () => {
+    const output = formatServerList([], { sshConfigHosts: ['root@esc'] });
+
+    assert.doesNotMatch(output, /No SSH servers configured\./);
+    assert.doesNotMatch(output, /Raw JSON/);
+    assert.match(output, /can be targeted with the 'host' parameter/);
+    assert.match(output, /- root@esc/);
   });
 
   it('没有服务器也没有可用主机时仍返回友好提示', () => {

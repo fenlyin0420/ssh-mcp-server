@@ -7,6 +7,14 @@ import { normalizeSshConfig } from "../utils/ssh-config-normalizer.js";
 
 const ADHOC_TEMPLATE_NAME = "adhoc-defaults";
 
+/** Flags declared as `type: "boolean"` in parseArgs */
+const BOOLEAN_OPTIONS = [
+  "--allow-adhoc-hosts",
+  "--adhoc-allow-password-auth",
+  "--pty",
+  "--try-keyboard",
+];
+
 function splitCommaList(value: string | undefined): string[] | undefined {
   if (!value) {
     return undefined;
@@ -41,11 +49,34 @@ function parseAdhocTransportMode(
  */
 export class CommandLineParser {
   /**
+   * Boolean flags accept no value: `--flag false` would silently enable the
+   * flag and leak the literal "false" into the positional host slot.
+   * @private
+   */
+  private static assertNoBooleanValue(rawArgs: string[]): void {
+    for (let index = 0; index < rawArgs.length; index += 1) {
+      if (!BOOLEAN_OPTIONS.includes(rawArgs[index])) {
+        continue;
+      }
+
+      const next = rawArgs[index + 1];
+      if (next !== undefined && /^(true|false)$/i.test(next)) {
+        throw new Error(
+          `${rawArgs[index]} is a boolean flag and does not take a value: write ${rawArgs[index]} to enable it, or omit it to disable it (got '${next}').`,
+        );
+      }
+    }
+  }
+
+  /**
    * Parse command line arguments
    */
   public static parseArgs(): ParsedArgs {
+    const rawArgs = process.argv.slice(2);
+    this.assertNoBooleanValue(rawArgs);
+
     const { values, positionals } = parseArgs({
-      args: process.argv.slice(2),
+      args: rawArgs,
       options: {
         "config-file": { type: "string" },
         "ssh-config-file": { type: "string" },
