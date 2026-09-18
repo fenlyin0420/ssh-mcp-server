@@ -8,7 +8,9 @@
 test/
 ├── ssh-config-parser.test.js      # SSH 配置解析器测试
 ├── command-line-parser.test.js    # 命令行参数解析器测试
+├── adhoc-resolver.test.js         # ad-hoc 主机解析（ssh config/模板/允许名单/凭据边界）
 ├── ssh-connection-manager.test.js # SSH 连接管理器测试
+├── list-servers.test.js           # list-servers 输出格式测试
 ├── integration.test.js            # 集成测试
 └── fixtures/                      # 测试数据（自动生成）
 ```
@@ -71,6 +73,16 @@ node --test test/ssh-config-parser.test.js
 - ✅ 命令验证（白名单、黑名单、正则表达式）
 - ✅ 连接状态管理
 - ✅ 多服务器支持
+- ✅ ad-hoc 主机（`--allow-adhoc-hosts`）：目标解析、连接复用、白名单继承、允许名单、LRU 淘汰
+
+### 4. Ad-hoc Resolver 测试
+
+测试 `src/services/adhoc-resolver.ts` 的功能：
+
+- ✅ 字段优先级（工具参数 > `~/.ssh/config` > 启动模板）
+- ✅ 主机允许名单（glob、`!` 取反、按解析后的地址匹配）
+- ✅ 凭据边界（默认不继承密码/键盘交互认证）
+- ✅ 连接 key 的生成与解析
 
 ### 4. 集成测试
 

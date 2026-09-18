@@ -34,6 +34,7 @@ ssh-mcp-server 是一个桥接工具，可以让 AI 助手等支持 MCP 协议�
 - **🚇 双传输模式**：同时支持 `exec` 和 `shell` 两种 transport，兼容直连主机与堡垒机或跳板机场景
 - **📂 文件传输**：支持双向文件传输功能，可上传本地文件到服务器或从服务器下载文件
 - **🔑 凭据隔离**：SSH 凭据完全在本地管理，不会暴露给 AI 模型，增强安全性
+- **🌐 连接任意服务器**：开启 `--allow-adhoc-hosts` 后，调用工具时用 `host` 参数指定目标（IP 或 `~/.ssh/config` 别名）即可，新增服务器无需改动任何配置
 - **🚀 即用即走**：使用 NPX 可直接运行，无需全局安装，方便快捷
 
 ## 📦 开源仓库
@@ -50,7 +51,9 @@ NPM: [https://www.npmjs.com/package/@fenlyin/ssh-mcp-server](https://www.npmjs.c
 | run-whitelisted-command | 白名单命令直行工具 | 仅执行命中白名单的命令；配合客户端 allowlist 可免弹窗直行 |
 | upload | 文件上传工具 | 将本地文件上传到远程服务器指定位置 |
 | download | 文件下载工具 | 从远程服务器下载文件到本地指定位置 |
-| list-servers | 服务器列表工具 | 列出所有可用SSH服务器配置 |
+| list-servers | 服务器列表工具 | 列出已配置的服务器、当前 ad-hoc 连接，以及 SSH config 中可用的主机别名 |
+
+除 `list-servers` 外，所有工具都额外接受可选的 `host` / `port` / `username` 参数，用于在调用时指定目标主机（需要启动时加 `--allow-adhoc-hosts`，见 [连接任意服务器](#11-🌐-连接任意服务器ad-hoc-主机)）。凭据只来自 `~/.ssh/config` 或启动参数，**不会**通过工具参数传递。
 
 ## 📚 使用方法
 
@@ -555,6 +558,73 @@ npx @fenlyin/ssh-mcp-server \
 }
 ```
 
+### 11. 🌐 连接任意服务器（ad-hoc 主机）
+
+前面几节的目标主机都在**配置里写死**：换一台机器就得改配置、重装 MCP、重启客户端。加上 `--allow-adhoc-hosts` 后，调用工具时用 `host` 参数指定目标即可，配置文件里**不需要写任何 host**：
+
+```json
+{
+  "mcpServers": {
+    "ssh-mcp-server": {
+      "type": "stdio",
+      "command": "npx",
+      "args": [
+        "-y",
+        "@fenlyin/ssh-mcp-server",
+        "--allow-adhoc-hosts",
+        "--username", "root",
+        "--privateKey", "~/.ssh/id_rsa",
+        "--whitelist", "^ls( .*)?,^cat .*,^tail .*,^df .*,^free .*,^ps .*"
+      ]
+    }
+  }
+}
+```
+
+之后就可以直接说「去 esc 上看看磁盘」「连 192.168.1.126 跑一下 nvidia-smi」，模型会用 `host` 参数发起调用：
+
+```json
+{
+  "tool": "execute-command",
+  "params": {
+    "cmdString": "df -h",
+    "host": "esc"
+  }
+}
+```
+
+#### 连接参数是怎么解析的
+
+`host` 可以是 IP、主机名，也可以是 `~/.ssh/config` 里的 **Host 别名**。每个字段按下面的优先级取值：
+
+| 字段 | 优先级（从左到右） |
+|---|---|
+| 实际地址 | `~/.ssh/config` 的 `HostName` → 调用时传入的 `host` |
+| 用户名 | 工具参数 `username` → SSH config 的 `User` → 默认连接的用户名（`--username`） |
+| 端口 | 工具参数 `port` → SSH config 的 `Port` → `--port`（默认 22） |
+| 私钥 | SSH config 的 `IdentityFile` → 默认连接（`--privateKey`） |
+| Agent / 代理 / 超时 / 白名单 / 黑名单 / 路径限制 | 启动参数（即默认连接的那一套） |
+
+也就是说：**SSH config 里的主机专属信息优先，其余从启动参数继承**。本机 `~/.ssh/config` 里已有 `Host esc / User fenlyin` 这类条目时，直接写 `host: "esc"` 就能连上。
+
+> ℹ️ **默认连接仍然有效**：配置里保留 `--host` 时，不传 `host` 的调用照旧连默认主机；完全不写 `--host`（像上面的例子）则每次调用都必须给出 `host`。
+
+#### 安全开关
+
+| 参数 | 作用 |
+|---|---|
+| `--allow-adhoc-hosts` | 总开关（默认关闭）。不开时调用带 `host` 会被明确拒绝，而不是静默连到默认主机 |
+| `--adhoc-host-patterns <globs>` | 把「任意主机」收窄成允许名单，例如 `192.168.*,esc,xxfwq`；支持 `*`/`?` 通配和 `!` 取反，匹配的是 **SSH config 解析后的实际地址**（防止别名指向别处绕过限制） |
+| `--adhoc-allow-password-auth` | ad-hoc 主机**默认不继承密码**（密码会被发往调用方指定的任意主机）。只使用密钥/Agent 时无需理会；确实要用密码认证再打开 |
+| `--adhoc-transport-mode <exec\|shell>` | ad-hoc 主机默认继承启动时的 transport 模式，需要单独指定时用它覆盖 |
+
+其他几条边界：
+
+- 白名单/黑名单/路径限制**整体继承**默认连接（ad-hoc 主机不单独配置）；没有白名单时 `run-whitelisted-command` 在 ad-hoc 主机上会拒绝所有命令，只能走 `execute-command` 弹窗审批。
+- ad-hoc 连接按「主机 + 端口 + 用户名」复用，最多同时保留 16 条，超出后按最近最少使用淘汰（下次调用会自动重连）。
+- ad-hoc 主机**不会**触发启动时的系统状态采集（不会在你只是临时连一下的机器上跑一堆探测命令）。
+- `connectionName` 与 `host` 不能同时传：前者用于选择配置好的连接，后者用于临时目标，同时给出会直接报错，避免连错机器。
+
 ### ⏱️ 命令执行超时
 
 `execute-command` 工具支持超时选项，防止命令无限期挂起：
@@ -599,6 +669,11 @@ npx @fenlyin/ssh-mcp-server \
 ]
 ```
 
+开启 `--allow-adhoc-hosts` 后，返回里还会包含两类信息：
+
+- 当前已建立的 **ad-hoc 连接**（`adhoc` 字段为 `true`，摘要行显示为 `[adhoc] <你请求的主机名>`，后面跟实际连接地址）；原始 `name` 形如 `adhoc:esc:22:root`，也可以直接当 `connectionName` 复用。
+- `~/.ssh/config` 里**可以访问的主机别名**（受 `--adhoc-host-patterns` 过滤，最多列 50 条），方便直接拿来做 `host` 参数。
+
 ### ⚙️ 命令行选项参考
 
 ```text
@@ -623,8 +698,11 @@ npx @fenlyin/ssh-mcp-server \
   --transport-mode    SSH transport 模式: exec 或 shell（默认: exec）
   --shell-ready-timeout   shell 就绪探测超时，单位毫秒（默认: 10000）
   --command-template  命令模板；shell 参数用 <quotedCommand>，原样插入用 <command>
+  --allow-adhoc-hosts   允许调用时用 host 参数指定任意主机（默认: false）
+  --adhoc-host-patterns  ad-hoc 主机允许名单，glob 通配、逗号分隔（默认: 不限）
+  --adhoc-allow-password-auth  允许 ad-hoc 主机继承密码/键盘交互认证（默认: false）
+  --adhoc-transport-mode  ad-hoc 主机的 transport 模式: exec 或 shell（默认: 继承）
   --pty               为命令执行分配伪终端（默认: true）
-  --pre-connect       启动时预连接所有配置的 SSH 服务器
   --version, -v       打印包版本
   --help              打印帮助信息
 ```
@@ -639,6 +717,11 @@ npx @fenlyin/ssh-mcp-server \
 - **路径遍历**：服务器内置了对本地文件系统路径遍历攻击的保护。但是，仍然需要注意在 `upload` 和 `download` 命令中使用的路径。
 - **本地传输范围**：默认仅允许访问当前工作目录。只有在明确可信时，才建议通过 `--allowed-local-paths` 或配置文件中的 `allowedLocalPaths` 放宽范围。
 - **远端传输范围**：SFTP upload/download 仅接受绝对 POSIX 路径。未配置 `allowedRemotePaths`（或 `--allowed-remote-paths`）时，任意远端路径都允许，但启动时会打印警告。强烈建议显式配置 `allowedRemotePaths` 白名单，避免模型被 prompt 注入后读写 `~/.ssh/authorized_keys`、`/etc/sshd_config` 之类敏感文件。
+- **ad-hoc 主机（`--allow-adhoc-hosts`）**：开启后，免确认的 `run-whitelisted-command` 作用域会从「固定一台」扩大到「所有可达且命中 `--adhoc-host-patterns` 的主机」，且这些主机继承默认连接的私钥/Agent。请：
+  - 用 `--adhoc-host-patterns` 把范围收窄到自己的网段/别名（不写等于不限）；
+  - 保持 `--whitelist` 尽量小（例如只放读操作），并考虑在开启了 ad-hoc 时**不要**把 `run-whitelisted-command` 加进客户端的 `permissions.allow`；
+  - 明白 **ad-hoc 主机默认不继承密码**（`--adhoc-allow-password-auth` 才会），避免把密码发往模型指定的主机；
+  - 注意本服务器**不校验 host key**（与 ssh2 默认行为一致）：目标主机由模型选择时，理论上存在中间人风险，这也是收窄允许名单的理由之一。
 
 ## 🌟 Star 历史
 

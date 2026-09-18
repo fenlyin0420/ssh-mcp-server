@@ -30,6 +30,7 @@ ssh-mcp-server is a bridging tool that enables AI assistants and other applicati
 - **🚇 Dual Transport Modes**: Supports both `exec` and `shell` transport modes for direct SSH hosts and bastion or jump-host scenarios
 - **📂 File Transfer**: Supports bidirectional file transfers, uploading local files to servers or downloading files from servers
 - **🔑 Credential Isolation**: SSH credentials are managed entirely locally and never exposed to AI models, enhancing security
+- **🌐 Connect to Any Server**: With `--allow-adhoc-hosts`, a tool call can pick its target through the `host` parameter (an IP or a `~/.ssh/config` alias) — adding a server never requires touching the configuration
 - **🚀 Ready to Use**: Can be run directly using NPX without global installation, making it convenient and quick to deploy
 
 ## 📦 Open Source Repository
@@ -46,7 +47,9 @@ NPM: [https://www.npmjs.com/package/@fenlyin/ssh-mcp-server](https://www.npmjs.c
 | run-whitelisted-command | Whitelisted Command Tool | Executes only commands matching the connection's whitelist; pair with a client allowlist to run without a prompt |
 | upload | File Upload Tool | Upload local files to specified locations on remote servers |
 | download | File Download Tool | Download files from remote servers to local specified locations |
-| list-servers | List Servers Tool | List all available SSH server configurations |
+| list-servers | List Servers Tool | List configured servers, live ad-hoc connections, and usable host aliases from the SSH config |
+
+Every tool except `list-servers` also accepts optional `host` / `port` / `username` parameters to pick the target at call time (requires `--allow-adhoc-hosts`; see [Connecting to any server](#11-🌐-connecting-to-any-server-ad-hoc-hosts)). Credentials come only from `~/.ssh/config` or the startup flags — they are **never** passed as tool parameters.
 
 ## 📚 Usage
 
@@ -549,6 +552,73 @@ Example (execute command with timeout options):
 }
 ```
 
+### 11. 🌐 Connecting to any server (ad-hoc hosts)
+
+In the sections above the target host is fixed in the configuration: switching servers means editing the config, reinstalling the MCP entry and restarting the client. With `--allow-adhoc-hosts` a tool call picks its own target through the `host` parameter, and **no host needs to be configured at all**:
+
+```json
+{
+  "mcpServers": {
+    "ssh-mcp-server": {
+      "type": "stdio",
+      "command": "npx",
+      "args": [
+        "-y",
+        "@fenlyin/ssh-mcp-server",
+        "--allow-adhoc-hosts",
+        "--username", "root",
+        "--privateKey", "~/.ssh/id_rsa",
+        "--whitelist", "^ls( .*)?,^cat .*,^tail .*,^df .*,^free .*,^ps .*"
+      ]
+    }
+  }
+}
+```
+
+You can then just ask for a host, and the model will pass it as `host`:
+
+```json
+{
+  "tool": "execute-command",
+  "params": {
+    "cmdString": "df -h",
+    "host": "esc"
+  }
+}
+```
+
+#### How connection parameters are resolved
+
+`host` may be an IP, a hostname, or a **Host alias** from `~/.ssh/config`. Each field resolves in this order:
+
+| Field | Precedence (left to right) |
+|---|---|
+| Destination | `HostName` from `~/.ssh/config` → the `host` passed by the call |
+| Username | tool `username` → SSH config `User` → the default connection's user (`--username`) |
+| Port | tool `port` → SSH config `Port` → `--port` (default 22) |
+| Private key | SSH config `IdentityFile` → the default connection (`--privateKey`) |
+| Agent / proxy / timeouts / whitelist / blacklist / path limits | startup flags (the default connection's settings) |
+
+In other words: **host-specific knowledge from the SSH config wins, everything else is inherited from the startup flags**. If `~/.ssh/config` already has an entry like `Host esc / User fenlyin`, then `host: "esc"` just works.
+
+> ℹ️ **The default connection still applies**: when `--host` is configured, calls without `host` target it as before. With no `--host` at all (as above), every call must name a `host`.
+
+#### Safety switches
+
+| Flag | Effect |
+|---|---|
+| `--allow-adhoc-hosts` | Master switch (default off). While off, a call carrying `host` is rejected explicitly instead of silently running on the default host |
+| `--adhoc-host-patterns <globs>` | Narrows "any host" to an allowlist, e.g. `192.168.*,esc,xxfwq`; supports `*`/`?` globs and `!` negation, matched against the **resolved destination** (so an alias cannot point somewhere else to bypass it) |
+| `--adhoc-allow-password-auth` | Ad-hoc hosts do **not** inherit the password by default (it would be sent to whatever host the caller names). Not needed for key/agent setups |
+| `--adhoc-transport-mode <exec\|shell>` | Ad-hoc hosts inherit the startup transport mode; use this to override it |
+
+Other boundaries:
+
+- The whitelist, blacklist and path limits are inherited wholesale from the default connection. Without a whitelist, `run-whitelisted-command` rejects everything on ad-hoc hosts and the model falls back to `execute-command` (with approval).
+- Ad-hoc connections are reused per host + port + username, with at most 16 kept alive; the least recently used one is evicted and reconnected on demand.
+- Ad-hoc hosts do **not** trigger the startup status collection, so no probe commands run on a machine you merely touched once.
+- `connectionName` and `host` are mutually exclusive: the former selects a configured connection, the latter an ad-hoc target. Passing both is an error rather than a guess.
+
 ### ⏱️ Command Execution Timeout
 
 The `execute-command` tool supports timeout options to prevent commands from hanging indefinitely:
@@ -593,6 +663,11 @@ Example response:
 ]
 ```
 
+With `--allow-adhoc-hosts` the response also carries two extra kinds of information:
+
+- **Live ad-hoc connections** (`adhoc: true`, rendered as `[adhoc] <requested host>` followed by the actual destination). Their raw `name` looks like `adhoc:esc:22:root` and can be reused as a `connectionName`.
+- The **usable host aliases** from `~/.ssh/config` (filtered by `--adhoc-host-patterns`, capped at 50), ready to be passed as `host`.
+
 ### ⚙️ Command Line Options Reference
 
 ```text
@@ -617,8 +692,11 @@ Options:
   --transport-mode    SSH transport mode: exec or shell (default: exec)
   --shell-ready-timeout   Shell readiness probe timeout in milliseconds (default: 10000)
   --command-template  Command template, use <quotedCommand> for shell arguments or <command> for raw insertion
+  --allow-adhoc-hosts   Allow tool calls to target any host via the 'host' parameter (default: false)
+  --adhoc-host-patterns Restrict ad-hoc hosts to these glob patterns, comma-separated (default: any)
+  --adhoc-allow-password-auth  Inherit password/keyboard-interactive auth for ad-hoc hosts (default: false)
+  --adhoc-transport-mode  Transport mode for ad-hoc hosts: exec or shell (default: inherited)
   --pty               Allocate pseudo-tty for command execution (default: true)
-  --pre-connect       Pre-connect to all configured SSH servers on startup
   --version, -v       Print package version
   --help              Print this help message
 ```
@@ -633,6 +711,11 @@ This server provides powerful capabilities to execute commands and transfer file
 - **Path Traversal**: The server has built-in protection against path traversal attacks on the local filesystem. However, it is still important to be mindful of the paths used in `upload` and `download` commands.
 - **Local Transfer Scope**: By default, local file transfers are restricted to the current working directory. Use `--allowed-local-paths` or `allowedLocalPaths` in config only for explicitly trusted directories.
 - **Remote Transfer Scope**: SFTP upload/download accepts only absolute POSIX paths. If `allowedRemotePaths` (or `--allowed-remote-paths`) is not configured, any remote path is accepted and the server prints a startup warning. Configure `allowedRemotePaths` to whitelist a small set of remote directories; this is strongly recommended to prevent prompt-injection-driven reads or writes of files like `~/.ssh/authorized_keys` or `/etc/sshd_config`.
+- **Ad-hoc hosts (`--allow-adhoc-hosts`)**: enabling it widens the auto-approved `run-whitelisted-command` from one fixed machine to every reachable host matching `--adhoc-host-patterns`, all sharing the default connection's key/agent. Therefore:
+  - narrow the range with `--adhoc-host-patterns` (omitting it means *any* host);
+  - keep `--whitelist` as small as possible (read-only commands, ideally) and consider **not** allowlisting `run-whitelisted-command` in the client while ad-hoc is on;
+  - remember that ad-hoc hosts **do not inherit the password** unless `--adhoc-allow-password-auth` is set, so a password never travels to a model-chosen host by default;
+  - note that this server performs **no host key verification** (ssh2's default): when the target is chosen by the model, a man-in-the-middle is theoretically possible — another reason to keep the allowlist tight.
 
 ## 🌟 Star History
 

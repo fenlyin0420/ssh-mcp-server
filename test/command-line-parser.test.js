@@ -579,4 +579,130 @@ Host minimalhost
       assert.strictEqual(result.configs.test.host, '1.1.1.1');
     });
   });
+
+  describe('ad-hoc 主机策略', () => {
+    it('--allow-adhoc-hosts 允许在没有 host 的情况下启动', () => {
+      process.argv = ['node', 'test', '--allow-adhoc-hosts', '--username', 'root', '--privateKey', '~/.ssh/id_rsa'];
+
+      const result = CommandLineParser.parseArgs();
+
+      assert.deepStrictEqual(Object.keys(result.configs), []);
+      assert.strictEqual(result.adhoc.enabled, true);
+      assert.strictEqual(result.adhoc.defaults.username, 'root');
+      assert.match(result.adhoc.defaults.privateKey, /id_rsa$/);
+      // normalizeSshConfig 需要端口，模板固定用 22
+      assert.strictEqual(result.adhoc.defaults.port, 22);
+    });
+
+    it('未开启开关时仍然要求 host', () => {
+      process.argv = ['node', 'test', '--username', 'root', '--privateKey', '~/.ssh/id_rsa'];
+
+      assert.throws(
+        () => CommandLineParser.parseArgs(),
+        /Missing required parameters/,
+      );
+    });
+
+    it('模板不继承默认主机的 SSH config 取值', () => {
+      process.argv = [
+        'node', 'test',
+        '--allow-adhoc-hosts',
+        '--host', 'testhost',
+        '--ssh-config-file', testSshConfigPath,
+      ];
+
+      const result = CommandLineParser.parseArgs();
+
+      // 默认连接照旧解析 SSH config
+      assert.strictEqual(result.configs.default.host, '172.16.0.1');
+      assert.strictEqual(result.configs.default.username, 'testuser');
+      assert.strictEqual(result.configs.default.port, 2222);
+      // 但模板不能被这台主机专属的取值污染
+      assert.strictEqual(result.adhoc.defaults.username, undefined);
+      assert.strictEqual(result.adhoc.defaults.port, 22);
+      assert.strictEqual(result.adhoc.defaults.privateKey, undefined);
+    });
+
+    it('白名单/黑名单/路径模板按逗号切分', () => {
+      process.argv = [
+        'node', 'test',
+        '--allow-adhoc-hosts',
+        '--username', 'root',
+        '--privateKey', '~/.ssh/id_rsa',
+        '--whitelist', '^ls( .*)?,^cat .*',
+        '--blacklist', '^rm .*',
+        '--allowed-remote-paths', '/var/log,/srv',
+      ];
+
+      const result = CommandLineParser.parseArgs();
+
+      assert.deepStrictEqual(result.adhoc.defaults.commandWhitelist, ['^ls( .*)?', '^cat .*']);
+      assert.deepStrictEqual(result.adhoc.defaults.commandBlacklist, ['^rm .*']);
+      assert.strictEqual(result.adhoc.defaults.allowedRemotePaths.length, 2);
+    });
+
+    it('--adhoc-host-patterns 解析为数组', () => {
+      process.argv = [
+        'node', 'test',
+        '--allow-adhoc-hosts',
+        '--adhoc-host-patterns', '192.168.*,xxfwq,esc',
+      ];
+
+      const result = CommandLineParser.parseArgs();
+
+      assert.deepStrictEqual(result.adhoc.hostPatterns, ['192.168.*', 'xxfwq', 'esc']);
+      assert.strictEqual(result.adhoc.allowPasswordAuth, false);
+    });
+
+    it('未给出模式时不限制主机', () => {
+      process.argv = ['node', 'test', '--allow-adhoc-hosts'];
+
+      const result = CommandLineParser.parseArgs();
+
+      assert.strictEqual(result.adhoc.hostPatterns, undefined);
+    });
+
+    it('ad-hoc 相关参数必须与 --allow-adhoc-hosts 一起使用', () => {
+      for (const flag of [
+        ['--adhoc-host-patterns', '192.168.*'],
+        ['--adhoc-allow-password-auth'],
+        ['--adhoc-transport-mode', 'shell'],
+      ]) {
+        process.argv = ['node', 'test', '--host', '1.2.3.4', '--username', 'root', '--privateKey', '~/.ssh/id_rsa', ...flag];
+
+        assert.throws(
+          () => CommandLineParser.parseArgs(),
+          /requires --allow-adhoc-hosts/,
+          `${flag[0]} 单独使用时应该报错`,
+        );
+      }
+    });
+
+    it('--adhoc-transport-mode 覆盖继承的 transport 模式', () => {
+      process.argv = [
+        'node', 'test',
+        '--allow-adhoc-hosts',
+        '--adhoc-transport-mode', 'shell',
+      ];
+      assert.strictEqual(CommandLineParser.parseArgs().adhoc.transportMode, 'shell');
+
+      process.argv = ['node', 'test', '--allow-adhoc-hosts', '--adhoc-transport-mode', 'invalid'];
+      assert.throws(
+        () => CommandLineParser.parseArgs(),
+        /--adhoc-transport-mode must be either 'exec' or 'shell'/,
+      );
+    });
+
+    it('--adhoc-allow-password-auth 控制密码 inherit 开关', () => {
+      process.argv = ['node', 'test', '--allow-adhoc-hosts', '--adhoc-allow-password-auth'];
+
+      assert.strictEqual(CommandLineParser.parseArgs().adhoc.allowPasswordAuth, true);
+    });
+
+    it('未开启 ad-hoc 时不返回策略对象', () => {
+      process.argv = ['node', 'test', '--host', '1.2.3.4', '--username', 'root', '--privateKey', '~/.ssh/id_rsa'];
+
+      assert.strictEqual(CommandLineParser.parseArgs().adhoc, undefined);
+    });
+  });
 });

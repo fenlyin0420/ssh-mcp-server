@@ -2,7 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 
-interface SshConfigEntry {
+export interface SshConfigEntry {
   hostName?: string;
   user?: string;
   port?: number;
@@ -15,6 +15,27 @@ interface HostBlock {
 }
 
 /**
+ * 解析 SSH 配置文件路径并校验存在性
+ * @param configFilePath 显式指定的配置文件路径，未指定时使用 ~/.ssh/config
+ * @param tolerateMissing 默认路径不存在时返回 null 而不是抛错
+ */
+function resolveConfigPath(
+  configFilePath: string | undefined,
+  tolerateMissing: boolean
+): string | null {
+  const configPath = configFilePath || path.join(os.homedir(), '.ssh', 'config');
+
+  if (!fs.existsSync(configPath)) {
+    if (tolerateMissing && !configFilePath) {
+      return null;
+    }
+    throw new Error(`SSH config file not found: ${configPath}`);
+  }
+
+  return configPath;
+}
+
+/**
  * 查找 SSH 配置文件中指定主机别名的配置
  * @param hostAlias 主机别名
  * @param configFilePath 配置文件路径，默认为 ~/.ssh/config
@@ -24,20 +45,64 @@ export function lookupSshConfig(
   hostAlias: string,
   configFilePath?: string
 ): SshConfigEntry | null {
-  const configPath = configFilePath || path.join(os.homedir(), '.ssh', 'config');
+  const configPath = resolveConfigPath(configFilePath, true);
 
   // 默认路径不存在时静默返回 null
-  if (!configFilePath && !fs.existsSync(configPath)) {
+  if (!configPath) {
     return null;
-  }
-
-  // 显式指定路径不存在时抛错
-  if (configFilePath && !fs.existsSync(configPath)) {
-    throw new Error(`SSH config file not found: ${configPath}`);
   }
 
   const blocks = parseConfigFile(configPath, new Set());
   return matchHost(hostAlias, blocks);
+}
+
+export interface SshConfigHostSummary {
+  alias: string;
+  hostName?: string;
+  user?: string;
+  port?: number;
+}
+
+/**
+ * 列出 SSH 配置文件中所有具体的主机别名及其解析结果
+ * （忽略通配与否定模式，按出现顺序去重）
+ * @param configFilePath 配置文件路径，默认为 ~/.ssh/config
+ */
+export function listSshConfigHosts(
+  configFilePath?: string
+): SshConfigHostSummary[] {
+  const configPath = resolveConfigPath(configFilePath, true);
+
+  if (!configPath) {
+    return [];
+  }
+
+  const blocks = parseConfigFile(configPath, new Set());
+  const hosts: SshConfigHostSummary[] = [];
+  const seen = new Set<string>();
+
+  for (const block of blocks) {
+    for (const pattern of block.patterns) {
+      // 通配模式与否定模式不是可以直接连接的目标
+      if (pattern.startsWith('!') || pattern.includes('*') || pattern.includes('?')) {
+        continue;
+      }
+      if (seen.has(pattern)) {
+        continue;
+      }
+      seen.add(pattern);
+
+      const entry = matchHost(pattern, blocks);
+      hosts.push({
+        alias: pattern,
+        hostName: entry?.hostName,
+        user: entry?.user,
+        port: entry?.port,
+      });
+    }
+  }
+
+  return hosts;
 }
 
 /**
@@ -209,7 +274,11 @@ function hostBlockMatches(hostAlias: string, patterns: string[]): boolean {
   return positiveMatch;
 }
 
-function hostPatternMatches(hostAlias: string, pattern: string): boolean {
+/**
+ * 判断主机是否匹配 SSH 主机模式（`*` / `?` 通配，整串匹配）
+ * 与 ~/.ssh/config 的 Host 通配语义一致，供 ad-hoc 主机白名单复用
+ */
+export function hostPatternMatches(hostAlias: string, pattern: string): boolean {
   if (pattern === '*') {
     return true;
   }

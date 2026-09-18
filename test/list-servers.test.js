@@ -30,4 +30,33 @@ describe('List Servers Tool', () => {
     assert.match(output, /Raw JSON:/);
     assert.match(output, /"name": "dev"/);
   });
+
+  it('ad-hoc 连接显示请求的主机名与实际地址', () => {
+    const output = formatServerList([
+      {
+        name: 'adhoc:esc:2222:root',
+        host: '14.103.198.148',
+        port: 2222,
+        username: 'root',
+        connected: true,
+        adhoc: true,
+      },
+    ]);
+
+    assert.match(output, /\[connected\] \[adhoc\] esc \| root@14\.103\.198\.148:2222/);
+    // 原始 key 仍保留在 JSON 中，便于作为 connectionName 复用
+    assert.match(output, /"name": "adhoc:esc:2222:root"/);
+  });
+
+  it('可以列出 SSH config 中可用的主机', () => {
+    const output = formatServerList([], { sshConfigHosts: ['esc', 'root@xxfwq'] });
+
+    assert.match(output, /Hosts from the SSH config/);
+    assert.match(output, /- esc/);
+    assert.match(output, /- root@xxfwq/);
+  });
+
+  it('没有服务器也没有可用主机时仍返回友好提示', () => {
+    assert.strictEqual(formatServerList([], { sshConfigHosts: [] }), 'No SSH servers configured.');
+  });
 });

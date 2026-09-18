@@ -1,8 +1,13 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { SSHConnectionManager } from "../services/ssh-connection-manager.js";
-import { Logger } from "../utils/logger.js";
-import { toToolError } from "../utils/tool-error.js";
+import { toolErrorResult } from "../utils/tool-error.js";
+import {
+  connectionNameField,
+  hostField,
+  portField,
+  usernameField,
+} from "./target-schema.js";
 
 /**
  * Register the run-whitelisted-command tool.
@@ -25,14 +30,15 @@ export function registerRunWhitelistedCommandTool(server: McpServer): void {
         "The command MUST be in the connection's whitelist; otherwise the tool fails with COMMAND_NOT_WHITELISTED.",
         "Use this tool for routine whitelisted operations to avoid an approval prompt.",
         "For commands that are not whitelisted, use execute-command instead (it asks the user for approval before running).",
+        "When targeting an ad-hoc 'host', the whitelist inherited from the default connection applies.",
       ].join(" "),
       inputSchema: {
         cmdString: z.string().describe("Command to execute"),
         directory: z.string().optional().describe("Working directory for command execution"),
-        connectionName: z
-          .string()
-          .optional()
-          .describe("SSH connection name (optional, default is 'default')"),
+        connectionName: connectionNameField,
+        host: hostField,
+        port: portField,
+        username: usernameField,
         timeout: z
           .number()
           .optional()
@@ -41,7 +47,7 @@ export function registerRunWhitelistedCommandTool(server: McpServer): void {
           ),
       },
     },
-    async ({ cmdString, directory, connectionName, timeout }) => {
+    async ({ cmdString, directory, connectionName, host, port, username, timeout }) => {
       try {
         const result = await sshManager.executeWhitelistedCommand(
           cmdString,
@@ -49,29 +55,20 @@ export function registerRunWhitelistedCommandTool(server: McpServer): void {
           connectionName,
           {
             timeout,
+            host,
+            port,
+            username,
           },
         );
         return {
           content: [{ type: "text", text: result }],
         };
       } catch (error: unknown) {
-        const toolError = toToolError(error, "UNKNOWN_ERROR");
-        Logger.handleError(toolError, "Failed to execute whitelisted command");
-        return {
-          content: [{
-            type: "text",
-            text: JSON.stringify(
-              {
-                code: toolError.code,
-                message: toolError.message,
-                retriable: toolError.retriable,
-              },
-              null,
-              2,
-            ),
-          }],
-          isError: true,
-        };
+        return toolErrorResult(
+          error,
+          "UNKNOWN_ERROR",
+          "Failed to execute whitelisted command",
+        );
       }
     },
   );

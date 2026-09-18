@@ -38,6 +38,24 @@ export interface SSHConfig {
 export type SshConnectionConfigMap = Record<string, SSHConfig>;
 
 /**
+ * Ad-hoc host policy.
+ *
+ * When enabled, tool calls may target a host that was never configured at
+ * startup by passing a `host` argument (an IP/hostname or a ~/.ssh/config
+ * alias). Fields the call does not provide are resolved from ~/.ssh/config
+ * first and then from `defaults` (the single-host startup flags), so the
+ * credential surface stays limited to what the operator already configured.
+ */
+export interface AdhocPolicy {
+  enabled: boolean;
+  hostPatterns?: string[]; // glob patterns matched against the resolved target host; empty = allow any
+  sshConfigFile?: string; // SSH config file used to resolve aliases (default: ~/.ssh/config)
+  defaults?: Partial<SSHConfig>; // startup template for credentials and command policy
+  allowPasswordAuth?: boolean; // inherit password / tryKeyboard for ad-hoc hosts, default false
+  transportMode?: SSHConfig["transportMode"]; // override the inherited transport mode for ad-hoc hosts
+}
+
+/**
  * Log levels
  */
 export type LogLevel = "info" | "error" | "debug";
@@ -95,4 +113,5 @@ export interface ServerStatus {
  */
 export interface ParsedArgs {
   configs: SshConnectionConfigMap;
+  adhoc?: AdhocPolicy;
 }

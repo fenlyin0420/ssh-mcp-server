@@ -1,6 +1,6 @@
 import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert';
-import { lookupSshConfig } from '../build/utils/ssh-config-parser.js';
+import { listSshConfigHosts, lookupSshConfig } from '../build/utils/ssh-config-parser.js';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
@@ -317,6 +317,64 @@ describe('SSH Config Parser', () => {
       assert.strictEqual(config.user, 'globaluser'); // 来自 Host *
 
       fs.unlinkSync(tempConfig);
+    });
+  });
+  describe('listSshConfigHosts', () => {
+    it('应列出具体别名及其解析结果', () => {
+      const hosts = listSshConfigHosts(testConfigPath);
+
+      const dev = hosts.find((host) => host.alias === 'dev');
+      assert.ok(dev);
+      assert.strictEqual(dev.hostName, '192.168.1.100');
+      assert.strictEqual(dev.user, 'devuser');
+      assert.strictEqual(dev.port, 2222);
+
+      const staging = hosts.find((host) => host.alias === 'staging');
+      assert.ok(staging);
+      assert.strictEqual(staging.hostName, '192.168.1.100');
+    });
+
+    it('应跳过通配与否定模式', () => {
+      const tempConfig = path.join(fixturesDir, 'ssh-config-wildcards');
+      fs.writeFileSync(tempConfig, [
+        'Host *',
+        '    User globaluser',
+        '',
+        'Host web-*',
+        '    User webuser',
+        '',
+        'Host real-host !real-host-bad',
+        '    HostName 10.1.1.1',
+      ].join('\n'));
+
+      const aliases = listSshConfigHosts(tempConfig).map((host) => host.alias);
+
+      assert.deepStrictEqual(aliases, ['real-host']);
+      fs.unlinkSync(tempConfig);
+    });
+
+    it('别名重复出现时只列一次', () => {
+      const tempConfig = path.join(fixturesDir, 'ssh-config-dedupe');
+      fs.writeFileSync(tempConfig, [
+        'Host dup',
+        '    User first',
+        '',
+        'Host dup',
+        '    User second',
+      ].join('\n'));
+
+      const hosts = listSshConfigHosts(tempConfig);
+
+      assert.strictEqual(hosts.length, 1);
+      assert.strictEqual(hosts[0].user, 'first');
+      fs.unlinkSync(tempConfig);
+    });
+
+    it('显式指定的文件不存在时抛错', () => {
+      assert.throws(
+        () => listSshConfigHosts(path.join(fixturesDir, 'does-not-exist')),
+        /SSH config file not found/,
+      );
     });
   });
 });

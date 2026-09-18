@@ -26,6 +26,10 @@ Options:
   --transport-mode <mode>          SSH transport mode: exec or shell (default: exec)
   --shell-ready-timeout <ms>       Shell readiness probe timeout (default: 10000)
   --command-template <template>    Wrap commands with <command> or <quotedCommand>
+  --allow-adhoc-hosts              Allow tool calls to target any host via the 'host' parameter (default: false)
+  --adhoc-host-patterns <globs>    Restrict ad-hoc hosts to these glob patterns, comma-separated (default: *)
+  --adhoc-allow-password-auth      Inherit password/keyboard-interactive auth for ad-hoc hosts (default: false)
+  --adhoc-transport-mode <mode>    Transport mode for ad-hoc hosts: exec or shell (default: inherited)
   --pty                           Allocate pseudo-tty for exec mode commands (default: true)
   --try-keyboard                  Enable keyboard-interactive authentication
   --version, -v                   Print package version

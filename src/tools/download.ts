@@ -1,8 +1,13 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { SSHConnectionManager } from "../services/ssh-connection-manager.js";
-import { Logger } from "../utils/logger.js";
-import { toToolError } from "../utils/tool-error.js";
+import { toolErrorResult } from "../utils/tool-error.js";
+import {
+  connectionNameField,
+  hostField,
+  portField,
+  usernameField,
+} from "./target-schema.js";
 
 /**
  * Register file download tool
@@ -17,34 +22,26 @@ export function registerDownloadTool(server: McpServer): void {
       inputSchema: {
         remotePath: z.string().describe("Remote path"),
         localPath: z.string().describe("Local path"),
-        connectionName: z.string().optional().describe("SSH connection name (optional, default is 'default')"),
+        connectionName: connectionNameField,
+        host: hostField,
+        port: portField,
+        username: usernameField,
       },
     },
-    async ({ remotePath, localPath, connectionName }) => {
+    async ({ remotePath, localPath, connectionName, host, port, username }) => {
       try {
-        const result = await sshManager.download(remotePath, localPath, connectionName);
+        const result = await sshManager.download(
+          remotePath,
+          localPath,
+          connectionName,
+          { host, port, username },
+        );
         return {
           content: [{ type: "text", text: result }],
         };
       } catch (error: unknown) {
-        const toolError = toToolError(error, "UNKNOWN_ERROR");
-        Logger.handleError(toolError, "Failed to download file");
-        return {
-          content: [{
-            type: "text",
-            text: JSON.stringify(
-              {
-                code: toolError.code,
-                message: toolError.message,
-                retriable: toolError.retriable,
-              },
-              null,
-              2,
-            ),
-          }],
-          isError: true,
-        };
+        return toolErrorResult(error, "UNKNOWN_ERROR", "Failed to download file");
       }
     }
   );
-} 
+}

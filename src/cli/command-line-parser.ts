@@ -1,86 +1,45 @@
 import { parseArgs } from "node:util";
-import { SSHConfig, SshConnectionConfigMap, ParsedArgs } from "../models/types.js";
+import { SSHConfig, SshConnectionConfigMap, ParsedArgs, AdhocPolicy } from "../models/types.js";
 import fs from "fs";
 import path from "path";
-import os from "os";
 import { lookupSshConfig } from "../utils/ssh-config-parser.js";
+import { normalizeSshConfig } from "../utils/ssh-config-normalizer.js";
+
+const ADHOC_TEMPLATE_NAME = "adhoc-defaults";
+
+function splitCommaList(value: string | undefined): string[] | undefined {
+  if (!value) {
+    return undefined;
+  }
+
+  const items = value
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+
+  return items.length > 0 ? items : undefined;
+}
+
+function parseAdhocTransportMode(
+  value: unknown,
+): SSHConfig["transportMode"] | undefined {
+  if (value === undefined || value === null || value === "") {
+    return undefined;
+  }
+
+  if (value === "exec" || value === "shell") {
+    return value;
+  }
+
+  throw new Error(
+    `--adhoc-transport-mode must be either 'exec' or 'shell', got: ${String(value)}`,
+  );
+}
 
 /**
  * Command line argument parser class
  */
 export class CommandLineParser {
-  private static readonly DEFAULT_TRANSPORT_MODE: SSHConfig["transportMode"] = "exec";
-  private static readonly DEFAULT_SHELL_READY_TIMEOUT_MS = 10000;
-
-  private static parseBoolean(value: unknown): boolean | undefined {
-    if (value === undefined) {
-      return undefined;
-    }
-    if (typeof value === "boolean") {
-      return value;
-    }
-    if (typeof value === "string") {
-      const normalized = value.trim().toLowerCase();
-      if (normalized === "true") {
-        return true;
-      }
-      if (normalized === "false") {
-        return false;
-      }
-    }
-    return Boolean(value);
-  }
-
-  private static parseTransportMode(
-    value: unknown,
-  ): SSHConfig["transportMode"] | undefined {
-    if (value === undefined || value === null || value === "") {
-      return undefined;
-    }
-
-    if (value === "exec" || value === "shell") {
-      return value;
-    }
-
-    throw new Error(
-      `transportMode must be either 'exec' or 'shell', got: ${String(value)}`,
-    );
-  }
-
-  private static parseTimeout(
-    value: unknown,
-    fieldName: string,
-  ): number | undefined {
-    if (value === undefined || value === null || value === "") {
-      return undefined;
-    }
-
-    const parsed =
-      typeof value === "number" ? value : parseInt(String(value), 10);
-
-    if (!Number.isFinite(parsed) || parsed <= 0) {
-      throw new Error(`${fieldName} must be a positive number, got: ${String(value)}`);
-    }
-
-    return parsed;
-  }
-
-  private static parseMaxOutputBytes(value: unknown): number | undefined {
-    if (value === undefined || value === null || value === "") {
-      return undefined;
-    }
-
-    const parsed = typeof value === "number" ? value : Number(String(value));
-
-    if (!Number.isSafeInteger(parsed) || parsed < 0) {
-      throw new Error(
-        `maxOutputBytes must be a non-negative integer, got: ${String(value)}`,
-      );
-    }
-
-    return parsed;
-  }
-
   /**
    * Parse command line arguments
    */
@@ -108,6 +67,10 @@ export class CommandLineParser {
         "transport-mode": { type: "string" },
         "shell-ready-timeout": { type: "string" },
         "command-template": { type: "string" },
+        "allow-adhoc-hosts": { type: "boolean" },
+        "adhoc-host-patterns": { type: "string" },
+        "adhoc-allow-password-auth": { type: "boolean" },
+        "adhoc-transport-mode": { type: "string" },
         pty: { type: "boolean" },
         "try-keyboard": { type: "boolean" },
       },
@@ -133,12 +96,12 @@ export class CommandLineParser {
             if (!config.name || !config.host || !config.port || !config.username) {
               throw new Error("Each config in array must include name, host, port, username");
             }
-            configMap[config.name] = this.normalizeConfig(config);
+            configMap[config.name] = normalizeSshConfig(config);
           }
         } else if (typeof fileConfig === "object" && fileConfig !== null) {
           // Object format: {"dev": {host: "...", ...}, "prod": {...}}
           for (const [name, config] of Object.entries(fileConfig)) {
-            const normalizedConfig = this.normalizeConfig(config as any);
+            const normalizedConfig = normalizeSshConfig(config as any);
             normalizedConfig.name = name;
             configMap[name] = normalizedConfig;
           }
@@ -168,7 +131,7 @@ export class CommandLineParser {
         if (sshStr.trim().startsWith("{")) {
           try {
             const jsonConfig = JSON.parse(sshStr);
-            conf = this.normalizeConfig(jsonConfig);
+            conf = normalizeSshConfig(jsonConfig);
             if (!conf.name) {
               throw new Error("JSON config must include 'name' field");
             }
@@ -188,44 +151,82 @@ export class CommandLineParser {
     }
 
     // Priority 3: Compatible with single connection legacy parameters
-    if (Object.keys(configMap).length === 0) {
-      const host = values.host || positionals[0];
+    const host = values.host || positionals[0];
 
-      // 尝试从 SSH config 读取配置
-      let sshConfigEntry = null;
-      if (host) {
-        try {
-          sshConfigEntry = lookupSshConfig(host, values["ssh-config-file"]);
-        } catch (err) {
-          // 显式指定配置文件但读取失败时抛错
-          throw err;
-        }
-      }
+    // 尝试从 SSH config 读取配置
+    let sshConfigEntry = null;
+    if (host) {
+      sshConfigEntry = lookupSshConfig(host, values["ssh-config-file"]);
+    }
 
-      const portStr = values.port || positionals[1] || sshConfigEntry?.port?.toString() || "22";
-      const username = values.username || positionals[2] || sshConfigEntry?.user;
-      const password = values.password || positionals[3];
-      const privateKey = values.privateKey || sshConfigEntry?.identityFile;
-      const passphrase = values.passphrase || process.env.SSH_MCP_PASSPHRASE;
-      const resolvedAgent = values.agent !== undefined
+    const portStr = values.port || positionals[1] || sshConfigEntry?.port?.toString() || "22";
+    const username = values.username || positionals[2] || sshConfigEntry?.user;
+    const password = values.password || positionals[3];
+    const privateKey = values.privateKey || sshConfigEntry?.identityFile;
+    const passphrase = values.passphrase || process.env.SSH_MCP_PASSPHRASE;
+    const resolvedAgent = values.agent !== undefined
+      ? values.agent
+      : !password && !privateKey
+      ? process.env.SSH_AUTH_SOCK
+      : undefined;
+    // 命令行上是逗号分隔，配置文件里是 | 分隔，统一转成数组再交给归一化
+    const whitelist = splitCommaList(values.whitelist);
+    const blacklist = splitCommaList(values.blacklist);
+    const allowedLocalPaths = splitCommaList(values["allowed-local-paths"]);
+    const allowedRemotePaths = splitCommaList(values["allowed-remote-paths"]);
+    const commandTemplate = values["command-template"];
+    const pty = values.pty;
+    const tryKeyboard = values["try-keyboard"];
+
+    // 实际连接地址：优先使用 SSH config 的 HostName
+    const actualHost = sshConfigEntry?.hostName || host;
+
+    const adhocPolicy = this.parseAdhocPolicy(values);
+    const adhocEnabled = adhocPolicy !== undefined;
+
+    if (adhocPolicy) {
+      // 显式 flag 构成 ad-hoc 继承模板；位置参数与默认主机的 SSH config 取值
+      // 都是该主机专属的，不能外溢到其它主机
+      const templateAgent = values.agent !== undefined
         ? values.agent
-        : !password && !privateKey
+        : !values.password && !values.privateKey
         ? process.env.SSH_AUTH_SOCK
         : undefined;
-      const whitelist = values.whitelist;
-      const blacklist = values.blacklist;
-      const allowedLocalPaths = values["allowed-local-paths"];
-      const allowedRemotePaths = values["allowed-remote-paths"];
-      const commandTemplate = values["command-template"];
-      const pty = values.pty;
-      const tryKeyboard = values["try-keyboard"];
 
-      // 实际连接地址：优先使用 SSH config 的 HostName
-      const actualHost = sshConfigEntry?.hostName || host;
+      adhocPolicy.defaults = normalizeSshConfig({
+        name: ADHOC_TEMPLATE_NAME,
+        host: "",
+        port: values.port || 22,
+        username: values.username,
+        password: values.password,
+        privateKey: values.privateKey,
+        passphrase,
+        agent: templateAgent,
+        proxy: values.proxy,
+        socksProxy: values.socksProxy,
+        pty,
+        tryKeyboard,
+        transportMode: adhocPolicy.transportMode || values["transport-mode"],
+        shellReadyTimeoutMs: values["shell-ready-timeout"],
+        commandTemplate,
+        commandWhitelist: whitelist,
+        commandBlacklist: blacklist,
+        allowedLocalPaths,
+        allowedRemotePaths,
+      });
+    }
 
-      if (!actualHost || !portStr || !username || (!password && !privateKey && !resolvedAgent)) {
+    if (Object.keys(configMap).length === 0 && actualHost) {
+      if (
+        !portStr ||
+        !username ||
+        (!password && !privateKey && !resolvedAgent)
+      ) {
         throw new Error(
-          "Missing required parameters, need to provide host, port, username and password, private key or agent"
+          "Missing required parameters, need to provide host, port, username and password, private key or agent" +
+            (adhocEnabled
+              ? " (or drop --host and let tool calls pass a host, resolved from SSH config)"
+              : ""),
         );
       }
 
@@ -234,7 +235,7 @@ export class CommandLineParser {
         throw new Error("Port must be a valid number");
       }
 
-      configMap["default"] = this.normalizeConfig({
+      configMap["default"] = normalizeSshConfig({
         name: "default",
         host: actualHost,
         port,
@@ -250,35 +251,71 @@ export class CommandLineParser {
         transportMode: values["transport-mode"],
         shellReadyTimeoutMs: values["shell-ready-timeout"],
         commandTemplate,
-        commandWhitelist: whitelist
-          ? whitelist
-              .split(",")
-              .map((pattern) => pattern.trim())
-              .filter(Boolean)
-          : undefined,
-        commandBlacklist: blacklist
-          ? blacklist
-              .split(",")
-              .map((pattern) => pattern.trim())
-              .filter(Boolean)
-          : undefined,
-        allowedLocalPaths: allowedLocalPaths
-          ? allowedLocalPaths
-              .split(",")
-              .map((allowedPath) => allowedPath.trim())
-              .filter(Boolean)
-          : undefined,
-        allowedRemotePaths: allowedRemotePaths
-          ? allowedRemotePaths
-              .split(",")
-              .map((allowedPath) => allowedPath.trim())
-              .filter(Boolean)
-          : undefined,
+        commandWhitelist: whitelist,
+        commandBlacklist: blacklist,
+        allowedLocalPaths,
+        allowedRemotePaths,
       });
+    }
+
+    // 无默认主机且未开启 ad-hoc 时，连接参数无从谈起
+    if (Object.keys(configMap).length === 0 && !adhocEnabled) {
+      throw new Error(
+        "Missing required parameters, need to provide host, port, username and password, private key or agent",
+      );
     }
 
     return {
       configs: configMap,
+      adhoc: adhocPolicy,
+    };
+  }
+
+  /**
+   * 解析 ad-hoc 主机策略（未开启时返回 undefined）
+   * @private
+   */
+  private static parseAdhocPolicy(values: {
+    "allow-adhoc-hosts"?: boolean;
+    "adhoc-host-patterns"?: string;
+    "adhoc-allow-password-auth"?: boolean;
+    "adhoc-transport-mode"?: string;
+    "ssh-config-file"?: string;
+  }): AdhocPolicy | undefined {
+    const patternsRaw = values["adhoc-host-patterns"];
+    const passwordAuthRaw = values["adhoc-allow-password-auth"];
+    const transportModeRaw = values["adhoc-transport-mode"];
+
+    if (values["allow-adhoc-hosts"] !== true) {
+      const strayFlag = patternsRaw !== undefined
+        ? "--adhoc-host-patterns"
+        : passwordAuthRaw !== undefined
+        ? "--adhoc-allow-password-auth"
+        : transportModeRaw !== undefined
+        ? "--adhoc-transport-mode"
+        : undefined;
+
+      if (strayFlag) {
+        throw new Error(`${strayFlag} requires --allow-adhoc-hosts`);
+      }
+      return undefined;
+    }
+
+    const hostPatterns = patternsRaw
+      ? patternsRaw
+          .split(",")
+          .map((pattern) => pattern.trim())
+          .filter(Boolean)
+      : [];
+
+    const transportMode = parseAdhocTransportMode(transportModeRaw);
+
+    return {
+      enabled: true,
+      hostPatterns: hostPatterns.length > 0 ? hostPatterns : undefined,
+      sshConfigFile: values["ssh-config-file"],
+      allowPasswordAuth: passwordAuthRaw === true,
+      transportMode,
     };
   }
 
@@ -309,153 +346,11 @@ export class CommandLineParser {
       );
     }
     
-    return this.normalizeConfig(conf);
+    return normalizeSshConfig(conf);
   }
 
   /**
    * Normalize SSH config object to ensure proper types and structure
    * @private
    */
-  private static normalizeConfig(config: any): SSHConfig {
-    const port = typeof config.port === "number"
-      ? config.port
-      : parseInt(config.port, 10);
-
-    if (isNaN(port)) {
-      throw new Error(`Port must be a valid number, got: ${config.port}`);
-    }
-
-    return {
-      name: config.name,
-      host: config.host,
-      port,
-      username: config.username || config.user,
-      password: config.password,
-      privateKey: config.privateKey
-        ? this.normalizeLocalPath(String(config.privateKey))
-        : undefined,
-      passphrase: config.passphrase || process.env.SSH_MCP_PASSPHRASE,
-      agent: config.agent,
-      algorithms: config.algorithms,
-      proxy: config.proxy,
-      socksProxy: config.socksProxy,
-      pty: this.parseBoolean(config.pty),
-      tryKeyboard: this.parseBoolean(config.tryKeyboard),
-      transportMode:
-        this.parseTransportMode(config.transportMode) ||
-        this.DEFAULT_TRANSPORT_MODE,
-      shellReadyTimeoutMs:
-        this.parseTimeout(
-          config.shellReadyTimeoutMs,
-          "shellReadyTimeoutMs",
-        ) || this.DEFAULT_SHELL_READY_TIMEOUT_MS,
-      shellCommandTimeoutMs: this.parseTimeout(
-        config.shellCommandTimeoutMs,
-        "shellCommandTimeoutMs",
-      ),
-      connectionTimeoutMs: this.parseTimeout(
-        config.connectionTimeoutMs,
-        "connectionTimeoutMs",
-      ),
-      sftpTimeoutMs: this.parseTimeout(config.sftpTimeoutMs, "sftpTimeoutMs"),
-      maxOutputBytes: this.parseMaxOutputBytes(config.maxOutputBytes),
-      keepaliveIntervalMs: this.parseTimeout(
-        config.keepaliveIntervalMs,
-        "keepaliveIntervalMs",
-      ),
-      keepaliveCountMax: this.parseTimeout(
-        config.keepaliveCountMax,
-        "keepaliveCountMax",
-      ),
-      commandWhitelist: Array.isArray(config.commandWhitelist)
-        ? config.commandWhitelist
-        : config.whitelist
-        ? typeof config.whitelist === "string"
-          ? config.whitelist.split("|").map((s: string) => s.trim()).filter(Boolean)
-          : config.whitelist
-        : undefined,
-      commandBlacklist: Array.isArray(config.commandBlacklist)
-        ? config.commandBlacklist
-        : config.blacklist
-        ? typeof config.blacklist === "string"
-          ? config.blacklist.split("|").map((s: string) => s.trim()).filter(Boolean)
-          : config.blacklist
-        : undefined,
-      allowedLocalPaths: Array.isArray(config.allowedLocalPaths)
-        ? config.allowedLocalPaths
-            .map((allowedPath: unknown) =>
-              this.normalizeLocalPath(String(allowedPath)),
-            )
-            .filter(Boolean)
-        : typeof config.allowedLocalPaths === "string"
-          ? config.allowedLocalPaths
-              .split("|")
-              .map((allowedPath: string) =>
-                this.normalizeLocalPath(allowedPath.trim()),
-              )
-              .filter(Boolean)
-          : undefined,
-      allowedRemotePaths: Array.isArray(config.allowedRemotePaths)
-        ? config.allowedRemotePaths
-            .map((allowedPath: unknown) =>
-              this.normalizeRemotePath(String(allowedPath)),
-            )
-        : typeof config.allowedRemotePaths === "string"
-          ? config.allowedRemotePaths
-              .split("|")
-              .map((allowedPath: string) =>
-                this.normalizeRemotePath(allowedPath.trim()),
-              )
-              .filter(Boolean)
-          : undefined,
-      commandTemplate: this.parseCommandTemplate(config.commandTemplate),
-    };
-  }
-
-  private static parseCommandTemplate(
-    value: unknown,
-  ): string | undefined {
-    if (value === undefined || value === null || value === "") {
-      return undefined;
-    }
-
-    const template = String(value);
-    if (!template.includes("<command>") && !template.includes("<quotedCommand>")) {
-      throw new Error(
-        `commandTemplate must contain '<command>' or '<quotedCommand>' placeholder, got: ${template}`,
-      );
-    }
-
-    return template;
-  }
-
-  private static normalizeLocalPath(localPath: string): string {
-    return path.resolve(this.expandHomePath(localPath));
-  }
-
-  private static expandHomePath(localPath: string): string {
-    if (localPath === "~") {
-      return os.homedir();
-    }
-    if (localPath.startsWith("~/")) {
-      return path.join(os.homedir(), localPath.slice(2));
-    }
-    return localPath;
-  }
-
-  private static normalizeRemotePath(remotePath: string): string {
-    if (!remotePath) {
-      return "";
-    }
-    if (!path.posix.isAbsolute(remotePath)) {
-      throw new Error(
-        `allowedRemotePaths entries must be absolute POSIX paths, got: ${remotePath}`,
-      );
-    }
-    const normalized = path.posix.normalize(remotePath);
-    if (normalized.length > 1 && normalized.endsWith("/")) {
-      return normalized.slice(0, -1);
-    }
-    return normalized;
-  }
 }

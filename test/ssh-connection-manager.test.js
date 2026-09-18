@@ -1,4 +1,4 @@
-import { describe, it, before, afterEach } from 'node:test';
+import { describe, it, before, after, afterEach } from 'node:test';
 import assert from 'node:assert';
 import { EventEmitter } from 'node:events';
 import http from 'node:http';
@@ -177,6 +177,7 @@ describe('SSH Connection Manager', () => {
     manager.disconnect();
     manager.createClient = originalCreateClient;
     manager.scheduleStatusCollection = originalScheduleStatusCollection;
+    manager.setAdhocPolicy({ enabled: false });
   });
 
   describe('配置管理', () => {
@@ -1745,6 +1746,333 @@ describe('SSH Connection Manager', () => {
           return true;
         },
       );
+    });
+  });
+
+  describe('ad-hoc 主机（--allow-adhoc-hosts）', () => {
+    let sshConfigDir;
+    let sshConfigPath;
+
+    function createAdhocClient(handler) {
+      const client = new FakeClient({
+        onConnect: () => setImmediate(() => client.emit('ready')),
+        onExec: handler,
+      });
+      manager.createClient = () => client;
+      return client;
+    }
+
+    function createClientFactory(handler) {
+      const clients = [];
+      manager.createClient = () => {
+        const client = new FakeClient({
+          onConnect: () => setImmediate(() => client.emit('ready')),
+          onExec: handler,
+        });
+        clients.push(client);
+        return client;
+      };
+      return clients;
+    }
+
+    function emitSuccess(stream, output) {
+      setImmediate(() => {
+        stream.emit('data', Buffer.from(`${output}\n`));
+        stream.emit('exit', 0);
+        stream.emit('close', 0);
+      });
+    }
+
+    function enableAdhoc(overrides = {}) {
+      manager.setAdhocPolicy({
+        enabled: true,
+        sshConfigFile: sshConfigPath,
+        // 测试用模板是密码认证，ad-hoc 默认不继承密码
+        allowPasswordAuth: true,
+        ...overrides,
+      });
+    }
+
+    before(() => {
+      sshConfigDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ssh-mcp-adhoc-mgr-'));
+      sshConfigPath = path.join(sshConfigDir, 'config');
+      fs.writeFileSync(
+        sshConfigPath,
+        ['Host alias-a', '  HostName 10.9.9.9', '  User aliasuser', ''].join('\n'),
+      );
+    });
+
+    after(() => {
+      fs.rmSync(sshConfigDir, { recursive: true, force: true });
+    });
+
+    it('未开启开关时拒绝 host 参数且不建立连接', async () => {
+      const client = createAdhocClient(() => {});
+      manager.setConfig({ dev: createPasswordConfig({ name: 'dev' }) });
+
+      await assert.rejects(
+        () =>
+          manager.executeCommand('ls', undefined, undefined, { host: '10.0.0.5' }),
+        (error) => {
+          assert.ok(error instanceof ToolError);
+          assert.strictEqual(error.code, 'ADHOC_NOT_ENABLED');
+          return true;
+        },
+      );
+
+      assert.strictEqual(client.connectCalls.length, 0);
+    });
+
+    it('开启后按 host 连接、继承模板并复用同一条连接', async () => {
+      const client = createAdhocClient(({ callback }) => {
+        const stream = new FakeExecStream();
+        callback(undefined, stream);
+        emitSuccess(stream, 'ok');
+      });
+      manager.setConfig({
+        dev: createPasswordConfig({ name: 'dev', commandWhitelist: ['^ls( .*)?$'] }),
+      });
+      enableAdhoc();
+
+      assert.strictEqual(
+        await manager.executeCommand('ls', undefined, undefined, { host: '10.0.0.5' }),
+        'ok',
+      );
+      assert.strictEqual(client.connectCalls[0].host, '10.0.0.5');
+      assert.strictEqual(client.connectCalls[0].username, 'devuser');
+      assert.strictEqual(client.connectCalls[0].password, 'devpass');
+
+      const adhoc = manager.getAllServerInfos().find((entry) => entry.adhoc);
+      assert.ok(adhoc, '应在 list-servers 信息中显示为 ad-hoc 连接');
+      assert.strictEqual(adhoc.name, 'adhoc:10.0.0.5:22:devuser');
+      assert.strictEqual(adhoc.connected, true);
+
+      await manager.executeCommand('ls', undefined, undefined, { host: '10.0.0.5' });
+      assert.strictEqual(client.connectCalls.length, 1);
+    });
+
+    it('别名按 SSH config 解析后再连接', async () => {
+      const client = createAdhocClient(({ callback }) => {
+        const stream = new FakeExecStream();
+        callback(undefined, stream);
+        emitSuccess(stream, 'ok');
+      });
+      manager.setConfig({ dev: createPasswordConfig({ name: 'dev' }) });
+      enableAdhoc();
+
+      await manager.executeCommand('ls', undefined, undefined, { host: 'alias-a' });
+
+      assert.strictEqual(client.connectCalls[0].host, '10.9.9.9');
+      assert.strictEqual(client.connectCalls[0].username, 'aliasuser');
+      assert.ok(
+        manager.getAllServerInfos().some((entry) => entry.name === 'adhoc:alias-a:22:aliasuser'),
+      );
+    });
+
+    it('ad-hoc 连接继承白名单：命中放行、未命中拒绝', async () => {
+      createAdhocClient(({ callback }) => {
+        const stream = new FakeExecStream();
+        callback(undefined, stream);
+        emitSuccess(stream, 'ok');
+      });
+      manager.setConfig({
+        dev: createPasswordConfig({ name: 'dev', commandWhitelist: ['^ls( .*)?$'] }),
+      });
+      enableAdhoc();
+
+      assert.strictEqual(
+        await manager.executeWhitelistedCommand('ls -al', undefined, undefined, {
+          host: '10.0.0.5',
+        }),
+        'ok',
+      );
+
+      await assert.rejects(
+        () =>
+          manager.executeWhitelistedCommand('rm -rf /', undefined, undefined, {
+            host: '10.0.0.5',
+          }),
+        (error) => {
+          assert.strictEqual(error.code, 'COMMAND_NOT_WHITELISTED');
+          return true;
+        },
+      );
+    });
+
+    it('模板没有白名单时 ad-hoc 上拒绝所有白名单命令', async () => {
+      createAdhocClient(() => {});
+      manager.setConfig({ dev: createPasswordConfig({ name: 'dev' }) });
+      enableAdhoc();
+
+      await assert.rejects(
+        () =>
+          manager.executeWhitelistedCommand('ls', undefined, undefined, {
+            host: '10.0.0.5',
+          }),
+        (error) => {
+          assert.strictEqual(error.code, 'COMMAND_NOT_WHITELISTED');
+          return true;
+        },
+      );
+    });
+
+    it('黑名单在 ad-hoc 连接上同样拦截', async () => {
+      createAdhocClient(() => {});
+      manager.setConfig({
+        dev: createPasswordConfig({ name: 'dev', commandBlacklist: ['^rm '] }),
+      });
+      enableAdhoc();
+
+      await assert.rejects(
+        () => manager.executeCommand('rm -rf /', undefined, undefined, { host: '10.0.0.5' }),
+        (error) => {
+          assert.strictEqual(error.code, 'COMMAND_VALIDATION_FAILED');
+          return true;
+        },
+      );
+    });
+
+    it('已配置连接与 ad-hoc key 撞名时拒绝复用其凭据', async () => {
+      createAdhocClient(() => {});
+      manager.setConfig({
+        dev: createPasswordConfig({ name: 'dev' }),
+        'adhoc:10.0.0.5:22:devuser': createPasswordConfig({
+          name: 'adhoc:10.0.0.5:22:devuser',
+        }),
+      });
+      enableAdhoc();
+
+      await assert.rejects(
+        () => manager.executeCommand('ls', undefined, undefined, { host: '10.0.0.5' }),
+        (error) => {
+          assert.strictEqual(error.code, 'ADHOC_TARGET_INVALID');
+          return true;
+        },
+      );
+    });
+
+    it('主机不在允许名单内时拒绝且不建立连接', async () => {
+      const client = createAdhocClient(() => {});
+      manager.setConfig({ dev: createPasswordConfig({ name: 'dev' }) });
+      enableAdhoc({ hostPatterns: ['192.168.*'] });
+
+      await assert.rejects(
+        () => manager.executeCommand('ls', undefined, undefined, { host: 'alias-a' }),
+        (error) => {
+          assert.strictEqual(error.code, 'ADHOC_HOST_NOT_ALLOWED');
+          return true;
+        },
+      );
+
+      assert.strictEqual(client.connectCalls.length, 0);
+    });
+
+    it('同时传 connectionName 与 host 时报错', async () => {
+      createAdhocClient(() => {});
+      manager.setConfig({ dev: createPasswordConfig({ name: 'dev' }) });
+      enableAdhoc();
+
+      await assert.rejects(
+        () =>
+          manager.executeCommand('ls', undefined, 'dev', { host: '10.0.0.5' }),
+        (error) => {
+          assert.strictEqual(error.code, 'ADHOC_TARGET_INVALID');
+          return true;
+        },
+      );
+    });
+
+    it('没有默认连接且未指定 host 时提示缺少目标', async () => {
+      createAdhocClient(() => {});
+      manager.setConfig({});
+      enableAdhoc();
+
+      await assert.rejects(
+        () => manager.executeCommand('ls'),
+        (error) => {
+          assert.strictEqual(error.code, 'NO_TARGET_SPECIFIED');
+          return true;
+        },
+      );
+    });
+
+    it('只注册过 ad-hoc 目标时，不带 host 的调用提示缺少目标', async () => {
+      createAdhocClient(({ callback }) => {
+        const stream = new FakeExecStream();
+        callback(undefined, stream);
+        emitSuccess(stream, 'ok');
+      });
+      manager.setConfig({});
+      enableAdhoc({
+        // 没有默认连接时，凭据只能来自启动模板
+        defaults: { host: '', port: 22, username: 'root', password: 'pw' },
+      });
+
+      await manager.executeCommand('ls', undefined, undefined, { host: '10.0.0.5' });
+
+      await assert.rejects(
+        () => manager.executeCommand('ls'),
+        (error) => {
+          assert.strictEqual(error.code, 'NO_TARGET_SPECIFIED');
+          return true;
+        },
+      );
+    });
+
+    it('ad-hoc 主机不触发状态采集，已配置连接仍然采集', async () => {
+      const scheduled = [];
+      createAdhocClient(({ callback }) => {
+        const stream = new FakeExecStream();
+        callback(undefined, stream);
+        emitSuccess(stream, 'ok');
+      });
+      manager.scheduleStatusCollection = (key) => scheduled.push(key);
+      manager.setConfig({ dev: createPasswordConfig({ name: 'dev' }) });
+      enableAdhoc();
+
+      await manager.executeCommand('ls', undefined, undefined, { host: '10.0.0.5' });
+      assert.deepStrictEqual(scheduled, []);
+
+      await manager.executeCommand('ls', undefined, 'dev');
+      assert.deepStrictEqual(scheduled, ['dev']);
+    });
+
+    it('超过上限时按最近最少使用拆除 ad-hoc 连接', async () => {
+      const clients = createClientFactory(({ callback }) => {
+        const stream = new FakeExecStream();
+        callback(undefined, stream);
+        emitSuccess(stream, 'ok');
+      });
+      manager.setConfig({ dev: createPasswordConfig({ name: 'dev' }) });
+      enableAdhoc();
+
+      for (let index = 0; index < 17; index += 1) {
+        await manager.executeCommand('ls', undefined, undefined, {
+          host: `10.0.0.${index + 1}`,
+        });
+      }
+
+      const adhocEntries = manager.getAllServerInfos().filter((entry) => entry.adhoc);
+      assert.strictEqual(adhocEntries.length, 16);
+      assert.ok(!adhocEntries.some((entry) => entry.name === 'adhoc:10.0.0.1:22:devuser'));
+      assert.strictEqual(clients[0].endCalls > 0, true);
+    });
+
+    it('disconnect() 丢弃 ad-hoc 连接但保留已配置连接', async () => {
+      createAdhocClient(({ callback }) => {
+        const stream = new FakeExecStream();
+        callback(undefined, stream);
+        emitSuccess(stream, 'ok');
+      });
+      manager.setConfig({ dev: createPasswordConfig({ name: 'dev' }) });
+      enableAdhoc();
+
+      await manager.executeCommand('ls', undefined, undefined, { host: '10.0.0.5' });
+      manager.disconnect();
+
+      const infos = manager.getAllServerInfos();
+      assert.ok(infos.every((entry) => !entry.adhoc));
+      assert.ok(infos.some((entry) => entry.name === 'dev'));
     });
   });
 });

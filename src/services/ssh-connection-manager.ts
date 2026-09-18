@@ -1,6 +1,7 @@
 import { createRequire } from "node:module";
 import type { Client, ClientChannel, SFTPWrapper } from "ssh2";
 import {
+  AdhocPolicy,
   SSHConfig,
   SshConnectionConfigMap,
   ServerStatus,
@@ -8,6 +9,7 @@ import {
 import { Logger } from "../utils/logger.js";
 import { collectSystemStatus } from "../utils/status-collector.js";
 import { ToolError, ToolErrorCode } from "../utils/tool-error.js";
+import { isAdhocKey, resolveAdhocTarget } from "./adhoc-resolver.js";
 import fs from "fs";
 import path from "path";
 import type { Duplex } from "node:stream";
@@ -15,7 +17,30 @@ import { pipeline } from "node:stream/promises";
 
 const require = createRequire(import.meta.url);
 
-type RunCommandOptions = {
+/** Upper bound on live ad-hoc connections; the least recently used one is dropped */
+const ADHOC_MAX_CONNECTIONS = 16;
+
+function stripUndefined<T extends object>(value: T | undefined): Partial<T> {
+  if (!value) {
+    return {};
+  }
+
+  return Object.fromEntries(
+    Object.entries(value).filter(([, item]) => item !== undefined),
+  ) as Partial<T>;
+}
+
+/**
+ * Target selection for a tool call. `host` (an IP/hostname or ~/.ssh/config
+ * alias) requires the server to run with --allow-adhoc-hosts.
+ */
+type TargetOptions = {
+  host?: string;
+  port?: number;
+  username?: string;
+};
+
+type RunCommandOptions = TargetOptions & {
   timeout?: number;
 };
 
@@ -159,6 +184,8 @@ export class SSHConnectionManager {
   private shellQueues: Map<string, Promise<unknown>> = new Map();
   private shellBuffers: Map<string, string> = new Map();
   private defaultName: string = "default";
+  private adhocPolicy: AdhocPolicy = { enabled: false };
+  private adhocKeys: string[] = []; // least recently used first
 
   private constructor() {}
 
@@ -196,11 +223,162 @@ export class SSHConnectionManager {
     }
 
     this.configs = configs;
+    this.adhocKeys = [];
     if (defaultName && configs[defaultName]) {
       this.defaultName = defaultName;
     } else if (Object.keys(configs).length > 0) {
       this.defaultName = Object.keys(configs)[0];
     }
+  }
+
+  /**
+   * Set the ad-hoc host policy (per-call `host` targeting).
+   */
+  public setAdhocPolicy(policy: AdhocPolicy): void {
+    this.adhocPolicy = policy;
+  }
+
+  public getAdhocPolicy(): AdhocPolicy {
+    return this.adhocPolicy;
+  }
+
+  /**
+   * Resolve which connection a tool call targets.
+   *
+   * `connectionName` selects a configured connection; `host` selects an ad-hoc
+   * target, registered on first use and reused afterwards.
+   * @throws ToolError ADHOC_NOT_ENABLED | ADHOC_TARGET_INVALID | NO_TARGET_SPECIFIED
+   */
+  private resolveTarget(target: {
+    connectionName?: string;
+    host?: string;
+    port?: number;
+    username?: string;
+  }): string {
+    if (target.connectionName) {
+      if (target.host) {
+        throw new ToolError(
+          "ADHOC_TARGET_INVALID",
+          "Pass either 'connectionName' (an already configured connection) or 'host' (an ad-hoc target), not both.",
+          false,
+        );
+      }
+      return target.connectionName;
+    }
+
+    if (!target.host) {
+      // 只注册了 ad-hoc 目标（启动时没有 --host）时，defaultName 指向的连接并不存在
+      if (!this.configs[this.defaultName]) {
+        throw new ToolError(
+          "NO_TARGET_SPECIFIED",
+          "No default SSH connection is configured. Pass a 'host' to choose the target.",
+          false,
+        );
+      }
+      return this.defaultName;
+    }
+
+    if (Object.prototype.hasOwnProperty.call(this.configs, target.host)) {
+      return target.host;
+    }
+
+    if (!this.adhocPolicy.enabled) {
+      throw new ToolError(
+        "ADHOC_NOT_ENABLED",
+        `Targeting '${target.host}' by host is disabled on this server. Remove the 'host' parameter, use 'connectionName', or start the server with --allow-adhoc-hosts.`,
+        false,
+      );
+    }
+
+    return this.registerAdhocConnection(target.host, target);
+  }
+
+  /**
+   * Register (or reuse) the connection for an ad-hoc target.
+   */
+  private registerAdhocConnection(
+    host: string,
+    target: TargetOptions,
+  ): string {
+    const { key, config } = resolveAdhocTarget(
+      { host, port: target.port, username: target.username },
+      this.getAdhocBase(),
+      this.adhocPolicy,
+    );
+
+    // 该 key 已存在但不是我们注册的（例如配置文件里正好有个同名连接）时拒绝复用其凭据
+    if (
+      Object.prototype.hasOwnProperty.call(this.configs, key) &&
+      !this.adhocKeys.includes(key)
+    ) {
+      throw new ToolError(
+        "ADHOC_TARGET_INVALID",
+        `Connection name '${key}' is already configured; it cannot be reused as an ad-hoc target.`,
+        false,
+      );
+    }
+
+    if (!this.configs[key]) {
+      this.evictAdhocConnectionsForNewEntry();
+
+      this.configs[key] = config;
+      // 两张正则表只在 setConfig 里写过，注册时必须一并写入，否则白名单语义会漂移
+      this.commandWhitelistRegexes.set(
+        key,
+        this.compilePatterns(config.commandWhitelist, key, "whitelist"),
+      );
+      this.commandBlacklistRegexes.set(
+        key,
+        this.compilePatterns(config.commandBlacklist, key, "blacklist"),
+      );
+      Logger.log(
+        `Registered ad-hoc connection [${key}] -> ${config.username}@${config.host}:${config.port}`,
+      );
+    }
+
+    this.touchAdhocKey(key);
+    return key;
+  }
+
+  /**
+   * Credential/policy template inherited by ad-hoc hosts: the startup flags,
+   * falling back to the first configured connection (never another ad-hoc one).
+   */
+  private getAdhocBase(): Partial<SSHConfig> | undefined {
+    const named = Object.entries(this.configs).find(
+      ([key]) => !isAdhocKey(key),
+    )?.[1];
+
+    if (!named) {
+      return this.adhocPolicy.defaults;
+    }
+
+    return { ...named, ...stripUndefined(this.adhocPolicy.defaults) };
+  }
+
+  private evictAdhocConnectionsForNewEntry(): void {
+    while (this.adhocKeys.length >= ADHOC_MAX_CONNECTIONS) {
+      const oldest = this.adhocKeys[0];
+      // 最近使用过的连接（含正在执行命令的）总是排在后面，不会被选中
+      Logger.log(`Evicting least recently used ad-hoc connection [${oldest}]`);
+      this.unregisterAdhocConnection(oldest);
+    }
+  }
+
+  private touchAdhocKey(key: string): void {
+    this.adhocKeys = [...this.adhocKeys.filter((item) => item !== key), key];
+  }
+
+  private unregisterAdhocConnection(key: string): void {
+    this.invalidateConnection(key);
+    this.cleanupShellState(key, true);
+    this.statusCache.delete(key);
+    this.connected.delete(key);
+    this.pendingConnections.delete(key);
+    this.commandWhitelistRegexes.delete(key);
+    this.commandBlacklistRegexes.delete(key);
+    delete this.configs[key];
+    this.adhocKeys = this.adhocKeys.filter((item) => item !== key);
   }
 
   /**
@@ -317,7 +495,11 @@ export class SSHConnectionManager {
 
           this.clients.set(key, client);
           this.connected.set(key, true);
-          this.scheduleStatusCollection(key);
+          // ad-hoc 主机不跑状态采集：用户只是临时连一台机器执行命令，
+          // 不应顺带在其上触发一批系统探测命令
+          if (!isAdhocKey(key)) {
+            this.scheduleStatusCollection(key);
+          }
           resolveOnce();
         } catch (error) {
           this.connected.set(key, false);
@@ -399,7 +581,7 @@ export class SSHConnectionManager {
     cmdString: string,
     directory?: string,
     name?: string,
-    options: { timeout?: number } = {},
+    options: RunCommandOptions = {},
   ): Promise<string> {
     return this.runCommandInternal(
       cmdString,
@@ -423,7 +605,7 @@ export class SSHConnectionManager {
     cmdString: string,
     directory?: string,
     name?: string,
-    options: { timeout?: number } = {},
+    options: RunCommandOptions = {},
   ): Promise<string> {
     return this.runCommandInternal(
       cmdString,
@@ -567,9 +749,10 @@ export class SSHConnectionManager {
     localPath: string,
     remotePath: string,
     name?: string,
+    target: TargetOptions = {},
   ): Promise<string> {
-    const config = this.getConfig(name);
-    const key = name || this.defaultName;
+    const key = this.resolveTarget({ connectionName: name, ...target });
+    const config = this.getConfig(key);
     if (this.getTransportMode(config) === "shell") {
       throw new ToolError(
         "UNSUPPORTED_IN_SHELL_MODE",
@@ -578,9 +761,9 @@ export class SSHConnectionManager {
       );
     }
 
-    const validatedLocalPath = this.validateLocalPath(localPath, name, "read");
-    const validatedRemotePath = this.validateRemotePath(remotePath, name);
-    const client = await this.ensureConnected(name);
+    const validatedLocalPath = this.validateLocalPath(localPath, key, "read");
+    const validatedRemotePath = this.validateRemotePath(remotePath, key);
+    const client = await this.ensureConnected(key);
     const sftpTimeoutMs = this.getSftpTimeoutMs(config);
     const sftp = await this.withTimeout(
       this.openSftp(client),
@@ -628,9 +811,10 @@ export class SSHConnectionManager {
     remotePath: string,
     localPath: string,
     name?: string,
+    target: TargetOptions = {},
   ): Promise<string> {
-    const config = this.getConfig(name);
-    const key = name || this.defaultName;
+    const key = this.resolveTarget({ connectionName: name, ...target });
+    const config = this.getConfig(key);
     if (this.getTransportMode(config) === "shell") {
       throw new ToolError(
         "UNSUPPORTED_IN_SHELL_MODE",
@@ -639,9 +823,9 @@ export class SSHConnectionManager {
       );
     }
 
-    const validatedLocalPath = this.validateLocalPath(localPath, name, "write");
-    const validatedRemotePath = this.validateRemotePath(remotePath, name);
-    const client = await this.ensureConnected(name);
+    const validatedLocalPath = this.validateLocalPath(localPath, key, "write");
+    const validatedRemotePath = this.validateRemotePath(remotePath, key);
+    const client = await this.ensureConnected(key);
     const sftpTimeoutMs = this.getSftpTimeoutMs(config);
     const sftp = await this.withTimeout(
       this.openSftp(client),
@@ -785,6 +969,12 @@ export class SSHConnectionManager {
       this.clients.clear();
     }
 
+    // ad-hoc 连接是会话内的临时目标，随连接一起丢弃（配置过的连接不受影响）
+    for (const key of this.adhocKeys) {
+      delete this.configs[key];
+    }
+    this.adhocKeys = [];
+
     this.connected.clear();
     this.statusCache.clear();
     this.pendingConnections.clear();
@@ -805,6 +995,7 @@ export class SSHConnectionManager {
     port: number;
     username: string;
     connected: boolean;
+    adhoc: boolean;
     status?: ServerStatus;
   }> {
     return Object.keys(this.configs).map((key) => {
@@ -816,6 +1007,7 @@ export class SSHConnectionManager {
         port: config.port,
         username: config.username,
         connected: this.connected.get(key) === true,
+        adhoc: isAdhocKey(key),
         status: status,
       };
     });
@@ -1407,7 +1599,15 @@ export class SSHConnectionManager {
     options: RunCommandOptions = {},
     mode: CommandValidationMode = "standard",
   ): Promise<string> {
-    const validationResult = this.validateCommand(cmdString, name, mode);
+    // 先解析目标：ad-hoc 主机在首次使用时注册，白名单也据此选取
+    const key = this.resolveTarget({
+      connectionName: name,
+      host: options.host,
+      port: options.port,
+      username: options.username,
+    });
+
+    const validationResult = this.validateCommand(cmdString, key, mode);
     if (!validationResult.isAllowed) {
       throw new ToolError(
         validationResult.code || "COMMAND_VALIDATION_FAILED",
@@ -1416,8 +1616,7 @@ export class SSHConnectionManager {
       );
     }
 
-    const key = name || this.defaultName;
-    const config = this.getConfig(name);
+    const config = this.getConfig(key);
     const transportMode = this.getTransportMode(config);
     const timeout =
       options.timeout ??
@@ -1426,14 +1625,14 @@ export class SSHConnectionManager {
         : 30000);
     const connectionTimeoutMs = this.getConnectionTimeoutMs(config);
     const client = await this.withTimeout(
-      this.ensureConnected(name),
+      this.ensureConnected(key),
       connectionTimeoutMs,
       () => this.invalidateConnection(key),
       `SSH connection [${key}] timed out after ${connectionTimeoutMs}ms`,
     );
 
     if (transportMode === "shell") {
-      return this.runShellCommand(cmdString, directory, name, timeout);
+      return this.runShellCommand(cmdString, directory, key, timeout);
     }
 
     return this.runExecCommand(

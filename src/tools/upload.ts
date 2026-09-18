@@ -1,8 +1,13 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { SSHConnectionManager } from "../services/ssh-connection-manager.js";
-import { Logger } from "../utils/logger.js";
-import { toToolError } from "../utils/tool-error.js";
+import { toolErrorResult } from "../utils/tool-error.js";
+import {
+  connectionNameField,
+  hostField,
+  portField,
+  usernameField,
+} from "./target-schema.js";
 
 /**
  * Register file upload tool
@@ -17,33 +22,25 @@ export function registerUploadTool(server: McpServer): void {
       inputSchema: {
         localPath: z.string().describe("Local path"),
         remotePath: z.string().describe("Remote path"),
-        connectionName: z.string().optional().describe("SSH connection name (optional, default is 'default')"),
+        connectionName: connectionNameField,
+        host: hostField,
+        port: portField,
+        username: usernameField,
       },
     },
-    async ({ localPath, remotePath, connectionName }) => {
+    async ({ localPath, remotePath, connectionName, host, port, username }) => {
       try {
-        const result = await sshManager.upload(localPath, remotePath, connectionName);
+        const result = await sshManager.upload(
+          localPath,
+          remotePath,
+          connectionName,
+          { host, port, username },
+        );
         return {
           content: [{ type: "text", text: result }],
         };
       } catch (error: unknown) {
-        const toolError = toToolError(error, "UNKNOWN_ERROR");
-        Logger.handleError(toolError, "Failed to upload file");
-        return {
-          content: [{
-            type: "text",
-            text: JSON.stringify(
-              {
-                code: toolError.code,
-                message: toolError.message,
-                retriable: toolError.retriable,
-              },
-              null,
-              2,
-            ),
-          }],
-          isError: true,
-        };
+        return toolErrorResult(error, "UNKNOWN_ERROR", "Failed to upload file");
       }
     }
   );
