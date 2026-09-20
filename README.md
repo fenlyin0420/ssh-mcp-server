@@ -625,6 +625,15 @@ npx @fenlyin/ssh-mcp-server \
 - ad-hoc 主机**不会**触发启动时的系统状态采集（不会在你只是临时连一下的机器上跑一堆探测命令）。
 - `connectionName` 与 `host` 不能同时传：前者用于选择配置好的连接，后者用于临时目标，同时给出会直接报错，避免连错机器。
 
+#### 连接生命周期（命令执行的开销）
+
+每个目标的 SSH 连接**只建立一次**，之后的调用全部复用：
+
+- 首次调用某目标时建立 TCP/SSH 连接并缓存进连接池；后续调用复用同一条连接，每次只是在上面新开一个 exec / SFTP channel，用完即关。所以同一目标连续执行命令只有第一次有握手开销，后续是毫秒级。
+- 连接靠 SSH keepalive 维持（默认 10s 一次探测，失败 3 次判定断开）；断开后下次调用自动重建，无需重新配置。
+- 工具参数只接受 `host` / `port` / `username`，**密码和私钥路径永远不接受**（避免凭据被发往调用方任意指定的主机）。因此目标机器必须能用启动参数里的密钥（或 SSH config 的 `IdentityFile`）登录。
+- 调用方不传 `host`、启动时也没配 `--host` 时，会收到 `NO_TARGET_SPECIFIED` 错误提示必须指定目标。
+
 ### ⏱️ 命令执行超时
 
 `execute-command` 工具支持超时选项，防止命令无限期挂起：
@@ -664,10 +673,13 @@ npx @fenlyin/ssh-mcp-server \
 
 ```json
 [
-  { "name": "dev", "host": "1.2.3.4", "port": 22, "username": "alice" },
-  { "name": "prod", "host": "5.6.7.8", "port": 22, "username": "bob" }
+  { "name": "dev", "host": "1.2.3.4", "port": 22, "username": "alice", "connected": true },
+  { "name": "prod", "host": "5.6.7.8", "port": 22, "username": "bob", "connected": false },
+  { "name": "adhoc:esc:22:root", "host": "esc", "port": 22, "username": "root", "connected": true, "adhoc": true }
 ]
 ```
+
+`connected` 表示连接池中该目标的连接当前是否存活（可用来判断是否需要先预热连接）。
 
 开启 `--allow-adhoc-hosts` 后，返回里还会包含两类信息：
 

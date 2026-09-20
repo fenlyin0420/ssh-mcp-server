@@ -619,6 +619,15 @@ Other boundaries:
 - Ad-hoc hosts do **not** trigger the startup status collection, so no probe commands run on a machine you merely touched once.
 - `connectionName` and `host` are mutually exclusive: the former selects a configured connection, the latter an ad-hoc target. Passing both is an error rather than a guess.
 
+#### Connection lifecycle (per-command overhead)
+
+The SSH connection for each target is established **once** and then reused:
+
+- The first call to a target opens the TCP/SSH connection and caches it in the connection pool; later calls reuse the same connection and only open a fresh exec / SFTP channel per command, which is closed when done. So repeated commands on the same target pay the handshake cost only once — subsequent calls are millisecond-scale.
+- The connection is kept alive by SSH keepalives (a probe every 10 s by default; 3 consecutive failures mark it dead). If it drops, the next call reconnects automatically — no reconfiguration needed.
+- Tool parameters only accept `host` / `port` / `username`; **passwords and private key paths are never accepted** (credentials must not be sent to an arbitrary caller-named host). The target must therefore be reachable with the key from the startup flags (or the `IdentityFile` in the SSH config).
+- A call without `host` when `--host` was also not configured fails with `NO_TARGET_SPECIFIED`, telling you to name a target.
+
 ### ⏱️ Command Execution Timeout
 
 The `execute-command` tool supports timeout options to prevent commands from hanging indefinitely:
@@ -658,10 +667,13 @@ Example response:
 
 ```json
 [
-  { "name": "dev", "host": "1.2.3.4", "port": 22, "username": "alice" },
-  { "name": "prod", "host": "5.6.7.8", "port": 22, "username": "bob" }
+  { "name": "dev", "host": "1.2.3.4", "port": 22, "username": "alice", "connected": true },
+  { "name": "prod", "host": "5.6.7.8", "port": 22, "username": "bob", "connected": false },
+  { "name": "adhoc:esc:22:root", "host": "esc", "port": 22, "username": "root", "connected": true, "adhoc": true }
 ]
 ```
+
+`connected` shows whether that target's connection is currently alive in the pool (useful to tell whether a connection still needs to be warmed up).
 
 With `--allow-adhoc-hosts` the response also carries two extra kinds of information:
 
